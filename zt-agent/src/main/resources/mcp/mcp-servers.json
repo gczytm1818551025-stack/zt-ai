@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "baidu-search": {
+      "command": "uvx",
+      "args": ["baidu-mcp-server"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    }
+  }
+}

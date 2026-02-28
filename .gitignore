@@ -1,0 +1,18 @@
+# IntelliJ project files
+.idea
+.vscode
+.trae
+*.iml
+out
+gen
+target
+*.class
+node_modules
+
+*.log
+.settings
+.project
+logs
+job
+
+templates

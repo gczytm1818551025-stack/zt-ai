@@ -1,0 +1,40 @@
+{
+  "name": "AgentOutput",
+  "description": "main output method",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "currentState": {
+        "type": "object",
+        "properties": {
+          "previousEvaluation": {
+            "type": "string"
+          },
+          "memory": {
+            "type": "string"
+          },
+          "thinking": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "previousEvaluation",
+          "memory",
+          "thinking"
+        ]
+      },
+      "action": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+          }
+        }
+      }
+    },
+    "required": [
+      "currentState",
+      "action"
+    ]
+  }
+}

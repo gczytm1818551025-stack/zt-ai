@@ -1,0 +1,187 @@
+server:
+  port: 18081
+  tomcat:
+    uri-encoding: UTF-8
+    # 连接数满后的排队数，默认为100
+    accept-count: 1000
+    threads:
+      max: 800
+      # Tomcat启动初始线程数，默认值10
+      min-spare: 70
+
+# 日志配置
+logging:
+  level:
+    org.dialectics: debug
+    org.springframework: warn
+
+zt-ai:
+  memory:
+    maxMessages: 100
+  tools:
+    inputSchemaLocation: classpath:schema/reActToolSchema.json
+  file:
+    base: /Users/dialecticmaxism/Desktop
+    domain: http://localhost:18081
+  # ReAct 异步执行配置
+  react:
+    # 最大步数
+    max-step: 15
+    # 每次调用最大动作数
+    max-action-per-call: 10
+    # LLM 调用特点：I/O 密集、耗时较长(1-10秒)、需要较多并发
+    llm:
+      # 核心线程数：建议设置为 CPU 核心数或略高
+      # 4核CPU建议: 20
+      # 8核CPU建议: 40
+      core-pool-size: 20
+      # 最大线程数：建议设置为 CPU 核心数的 2-4 倍
+      # 4核CPU建议: 50-100
+      # 8核CPU建议: 100-200
+      max-pool-size: 100
+      # 队列容量：超出此值后创建新线程，线程池满后拒绝新任务
+      queue-capacity: 500
+      # 线程空闲存活时间（秒）：超过此时间会被回收
+      keep-alive-seconds: 120
+      # 单次 LLM 调用超时时间（秒）
+      timeout-seconds: 60
+
+    # 工具执行特点：I/O 密集、耗时中等(0.1-2秒)
+    tool:
+      # 核心线程数
+      core-pool-size: 10
+      # 最大线程数
+      max-pool-size: 50
+      # 队列容量
+      queue-capacity: 200
+      # 线程空闲存活时间（秒）
+      keep-alive-seconds: 60
+      # 单次工具执行超时时间（秒）
+      timeout-seconds: 30
+
+    # ==================== 并发控制配置 ====================
+    # 最大并发请求数
+    # 建议根据服务器内存和 CPU 核心数调整
+    # 每个请求约占用 1-5MB 内存
+    max-concurrent: 50
+    # 整个请求超时时间（秒）
+    request-timeout-seconds: 300
+
+    # ==================== 背压配置 ====================
+    # FluxSink 缓冲区大小
+    backpressure-buffer-size: 2048
+    # 背压策略：BUFFER(缓冲) | DROP(丢弃) | DROP_OLDEST(丢弃最旧) | LATEST(保留最新) | ERROR(报错) | IGNORE(忽略)
+    backpressure-strategy: BUFFER
+
+spring:
+  application:
+    name: zt-ai
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    driverClassName: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/react_ai?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8
+    username: root
+    password: Mx551818
+  data:
+    mongodb:
+      host: localhost
+      port: 27017
+      authentication-database: admin
+      database: react_ai
+      username: admin
+      password: Mx551818
+      auto-index-creation: true
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      password:
+      timeout: 10s
+      # ==================== Lettuce连接池配置 ====================
+      # 连接池配置（使用commons-pool2实现）
+      lettuce:
+        pool:
+          # 最大连接数：连接池能分配的最大连接数
+          # 建议值：50-200（根据并发量调整）
+          max-active: 100
+          # 最大空闲连接数：连接池中最多保持的空闲连接数
+          # 建议值：10-50
+          max-idle: 20
+          # 最小空闲连接数：连接池中至少保持的空闲连接数
+          # 建议值：5-10
+          min-idle: 5
+          # 获取连接最大等待时间（毫秒）：当连接池耗尽时，客户端等待获取连接的最大时间
+          # -1表示无限等待，建议设置一个合理值避免阻塞
+          max-wait: 10000
+          # 空闲连接检测间隔（毫秒）：定期检测并清理无效空闲连接
+          # 建议值：30000-60000（30-60秒）
+          time-between-eviction-runs: 60000
+  ai:
+    dashscope:
+      api-key: ${BAILIAN_KEY}
+      chat:
+        enabled: true
+        options:
+          model: qwen3-max
+          temperature: 0.6
+      embedding:
+        enabled: true
+        options:
+          model: text-embedding-v4 #向量模型
+          dimensions: 1024 #向量维度维度
+      audio:
+        synthesis:
+          options:
+            model: cosyvoice-v2
+            voice: longyingtian
+    openai:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: ${BAILIAN_KEY}
+      chat:
+        options:
+          model: deepseek-v3
+        completions-path: /chat/completions
+    #    vectorstore: #向量库配置
+    #      redis:
+    #        initialize-schema: true
+    #        index-name: custom-index
+    #        prefix: custom-prefix
+    mcp:
+      client:
+        enabled: true # 启用mcp客户端
+        name: ${spring.application.name} # 客户端名称
+        version: 1.0.0
+        type: ASYNC
+        request-timeout: 30s
+        toolcallback:
+          enabled: true
+        stdio: # mcp-server stdio方式调用
+          servers-configuration: classpath:mcp/mcp-servers.json
+
+mybatis-plus:
+  # 持久层实体类所在包别名
+  typeAliasesPackage: org.dialectics.ai.**.pojo
+  # mapper.xml映射文件扫描路径
+  mapperLocations: classpath*:mapper/**/*Mapper.xml
+  global-config:
+    db-config:
+      id-type: assign_id
+      update-strategy: not_null
+  configuration:
+    map-underscore-to-camel-case: true
+    default-enum-type-handler: com.baomidou.mybatisplus.core.handlers.MybatisEnumTypeHandler # mybatis-plus的枚举处理器
+
+jwt:
+  secretKey: DialecticsVan
+  ttl: 24 # 单位：小时
+  tokenHeader: Authorization
+
+aliyun:
+  access-key-id:
+  access-key-secret:
+  sms:
+    signName: 速通互联验证码
+    templateCode: 100001 # 登录/注册短信模板
+    # 使用aliyun自动生成的纯数字验证码，调用云校验
+    templateParam: "{\"code\":\"##code##\",\"min\":\"${aliyun.sms.ttl}\"}"
+    ttl: 5 # min
