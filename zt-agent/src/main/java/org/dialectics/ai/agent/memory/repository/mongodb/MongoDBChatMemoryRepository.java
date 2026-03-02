@@ -1,8 +1,7 @@
 package org.dialectics.ai.agent.memory.repository.mongodb;
 
 import cn.hutool.core.collection.CollStreamUtil;
-import org.dialectics.ai.agent.domain.pojo.AssistantMessage2;
-import org.dialectics.ai.agent.memory.ChatMemory2Repository;
+import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
 import org.dialectics.ai.agent.utils.ChatMessageConverter;
 import org.dialectics.ai.agent.domain.pojo.SessionMessageDocument;
 import org.springframework.ai.chat.messages.Message;
@@ -12,15 +11,12 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.util.Assert;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
 
 /**
  * mongoDB会话记忆存储仓库实现
  */
-public class MongoDBChatMemoryRepository implements ChatMemory2Repository {
+public class MongoDBChatMemoryRepository implements ZChatMemoryRepository {
     @Autowired
     private MongoTemplate mongoTemplate;
 
@@ -76,53 +72,12 @@ public class MongoDBChatMemoryRepository implements ChatMemory2Repository {
         List<Message> messages = findByConversationId(conversationId);
 
         // 2. 排除倒数两条，重新存储
-        List<Message> restMessages = messages.subList(0, messages.size() - 2);
+        List<Message> restMessages = messages.subList(0, messages.size() - count);
         deleteByConversationId(conversationId);
         SessionMessageDocument record = SessionMessageDocument.builder()
                 .conversationId(conversationId)
                 .messages(CollStreamUtil.toList(restMessages, ChatMessageConverter::toJson)) // 设置当前对话下的所有对话数据
                 .build();
         mongoTemplate.save(record);
-    }
-
-    @Override
-    public void appendToLastMessage(String conversationId, String contentSuffix, Function<Map<String, Object>, Map<String, Object>> paramsUpdater) {
-        // 1. 获取当前消息列表
-        List<Message> messages = findByConversationId(conversationId);
-        if (messages.isEmpty()) {
-            throw new IllegalStateException("No messages found for conversationId: " + conversationId);
-        }
-
-        // 2. 获取最后一条消息
-        Message lastMessage = messages.get(messages.size() - 1);
-        if (!(lastMessage instanceof AssistantMessage2)) {
-            throw new IllegalStateException("Last message is not an AssistantMessage2");
-        }
-
-        AssistantMessage2 lastMsg = (AssistantMessage2) lastMessage;
-
-        // 3. 追加 content
-        String currentContent = lastMsg.getText() != null ? lastMsg.getText() : "";
-        String newContent = currentContent + contentSuffix;
-
-        // 4. 更新 params
-        Map<String, Object> currentParams = lastMsg.getParams();
-        Map<String, Object> newParams = paramsUpdater.apply(currentParams != null ? currentParams : Map.of());
-
-        // 5. 创建新消息对象
-        AssistantMessage2 updatedMessage = new AssistantMessage2(
-                newContent,
-                lastMsg.getMetadata(),
-                lastMsg.getToolCalls(),
-                lastMsg.getMedia(),
-                newParams
-        );
-
-        // 6. 替换最后一条消息
-        List<Message> updatedMessages = new ArrayList<>(messages.subList(0, messages.size() - 1));
-        updatedMessages.add(updatedMessage);
-
-        // 7. 保存
-        saveAll(conversationId, updatedMessages);
     }
 }

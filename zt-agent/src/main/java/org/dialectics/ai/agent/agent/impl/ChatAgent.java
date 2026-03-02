@@ -8,7 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.domain.vo.ChatEventVo;
 import org.dialectics.ai.agent.manager.ToolResultManager;
-import org.dialectics.ai.agent.memory.ChatMemory2Repository;
+import org.dialectics.ai.agent.memory.ZChatMemory;
+import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
 import org.dialectics.ai.agent.service.SessionService;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.constants.RedisConstant;
@@ -35,9 +36,9 @@ public class ChatAgent extends AbstractChatAgent {
     @Resource(name = "dashScopeChatClient")
     private ChatClient chatClient;
     @Autowired
-    private ChatMemory chatMemory;
+    private ZChatMemory chatMemory;
     @Autowired
-    private ChatMemory2Repository chatMemoryRepository;
+    private ZChatMemoryRepository chatMemoryRepository;
     @Resource
     protected MessageChatMemoryAdvisor messageChatMemoryAdvisor;
     @Autowired

@@ -11,7 +11,7 @@ import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.domain.dto.SessionCreateDto;
-import org.dialectics.ai.agent.domain.pojo.AssistantMessage2;
+import org.dialectics.ai.agent.domain.pojo.ZAssistantMessage;
 import org.dialectics.ai.agent.manager.PromptManager;
 import org.dialectics.ai.common.constants.PromptNameConstant;
 import org.dialectics.ai.common.enums.MessageTypeEnum;
@@ -23,7 +23,6 @@ import org.dialectics.ai.agent.domain.vo.SessionVo;
 import org.dialectics.ai.server.mapper.ChatRecordMapper;
 import org.dialectics.ai.agent.service.ChatService;
 import org.dialectics.ai.agent.service.SessionService;
-import org.dialectics.ai.common.enums.ReActStepTypeEnum;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -79,9 +78,6 @@ public class SessionServiceImpl extends ServiceImpl<ChatRecordMapper, ChatRecord
         List<Message> messages = chatMemory.get(conversationId);
 
         List<MessageVo> result = new ArrayList<>();
-        List<Map<String, Object>> reActSteps = new ArrayList<>();
-        String finalContent = null;
-        int stepCount = 0;
 
         for (Message message : messages) {
             if (message instanceof UserMessage) {
@@ -91,79 +87,27 @@ public class SessionServiceImpl extends ServiceImpl<ChatRecordMapper, ChatRecord
                         .content(message.getText())
                         .build());
             } else if (message instanceof AssistantMessage) {
-                // 普通 Assistant 消息（无 params）
-                result.add(MessageVo.builder()
-                        .type(MessageTypeEnum.ASSISTANT)
-                        .content(message.getText())
-                        .build());
-            } else if (message instanceof AssistantMessage2) {
-                // AssistantMessage2（包含 params）
-                AssistantMessage2 msg2 = (AssistantMessage2) message;
+                ZAssistantMessage msg2 = (ZAssistantMessage) message;
+                List<Map<String, Object>> steps = msg2.getSteps();
+                Integer stepCount = msg2.getStepCount();
 
-                if (msg2.getParams() == null) {
-                    // 无 params，按普通消息处理
+                // 判断是否含有ReAct步骤记忆
+                if (CollUtil.isEmpty(steps)) {
                     result.add(MessageVo.builder()
                             .type(MessageTypeEnum.ASSISTANT)
                             .content(msg2.getText())
+                            .steps(steps)
+                            .stepCount(stepCount != null ? stepCount : steps.size())
+                            .params(msg2.getParams())
                             .build());
                 } else {
-                    // 有 params，解析为 ReAct 步骤
-                    Map<String, Object> params = msg2.getParams();
-                    Integer typeCode = (Integer) params.get("type");
-
-                    ReActStepTypeEnum stepType = ReActStepTypeEnum.fromCode(typeCode);
-
-                    if (stepType != null) {
-                        // 根据 type 分类处理
-                        switch (stepType) {
-                            case PLAN:
-                                // PLAN: index, taskContent, previousEvaluation, memory, thinking
-                                Map<String, Object> planData = Map.of(
-                                        "type", typeCode,
-                                        "index", params.get("index"),
-                                        "taskContent", params.get("taskContent"),
-                                        "previousEvaluation", params.get("previousEvaluation"),
-                                        "memory", params.get("memory"),
-                                        "thinking", params.get("thinking")
-                                );
-                                reActSteps.add(planData);
-                                break;
-                            case THINKING:
-                                // THINKING: thinkContent
-                                Map<String, Object> thinkingData = Map.of(
-                                        "type", typeCode,
-                                        "thinkContent", params.get("thinkContent")
-                                );
-                                reActSteps.add(thinkingData);
-                                break;
-                            case ACTION:
-                                // ACTION: success, result, resultType
-                                stepCount++;
-                                Map<String, Object> actionData = Map.of(
-                                        "type", typeCode,
-                                        "success", params.get("success"),
-                                        "result", params.get("result"),
-                                        "resultType", params.get("resultType")
-                                );
-                                reActSteps.add(actionData);
-                                break;
-                            case FINAL:
-                                // FINAL: content 存储在消息的 text 中
-                                finalContent = msg2.getText();
-                                break;
-                        }
-                    }
+                    result.add(MessageVo.builder()
+                            .type(MessageTypeEnum.ASSISTANT)
+                            .content(msg2.getText())
+                            .params(msg2.getParams())
+                            .build());
                 }
             }
-        }
-
-        // 如果有 ReAct 步骤，聚合到最后的 Assistant 消息中
-        if (!reActSteps.isEmpty()) {
-            result.add(MessageVo.builder()
-                    .type(MessageTypeEnum.ASSISTANT)
-                    .content(finalContent != null ? finalContent : "")
-                    .params(Map.of("steps", new ArrayList<>(reActSteps), "stepCount", stepCount))
-                    .build());
         }
 
         return result;
@@ -240,8 +184,8 @@ public class SessionServiceImpl extends ServiceImpl<ChatRecordMapper, ChatRecord
      * 例如：清空 Agent 模式的 ReAct 步骤记忆，但保留普通聊天历史
      *
      * @param sessionId 会话 ID
-     * @param modeType 会话类型（CHAT/AGENT），可选
-     * @param clearAll 是否清空所有记忆，默认 true
+     * @param modeType  会话类型（CHAT/AGENT），可选
+     * @param clearAll  是否清空所有记忆，默认 true
      */
     public void clearConversationMemory(String sessionId, String modeType, Boolean clearAll) {
         String conversationId = ChatService.getConversationId(sessionId, String.valueOf(UserContext.get()));

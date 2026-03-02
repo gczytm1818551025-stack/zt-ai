@@ -6,7 +6,8 @@ import org.dialectics.ai.agent.agent.Agent;
 import org.dialectics.ai.agent.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
-import org.dialectics.ai.agent.memory.ChatMemory2Repository;
+import org.dialectics.ai.agent.memory.ZChatMemory;
+import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
 import org.dialectics.ai.agent.react.ReActFlowOrchestrator;
 import org.dialectics.ai.agent.tools.schema.ToolDomain;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
@@ -64,9 +65,9 @@ public class ReActTaskAgent implements Agent {
     @Value("${zt-ai.tools.inputSchemaLocation}")
     private String inputSchemaLocation;
     @Autowired
-    private ChatMemory chatMemory;
+    private ZChatMemory chatMemory;
     @Autowired
-    private ChatMemory2Repository chatMemoryRepository;
+    private ZChatMemoryRepository chatMemoryRepository;
     @Autowired(required = false)
     protected List<ToolCallbackProvider> toolCallbackProviders;
     @Autowired

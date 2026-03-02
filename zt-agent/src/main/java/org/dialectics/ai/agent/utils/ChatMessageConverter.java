@@ -4,8 +4,8 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
-import org.dialectics.ai.agent.domain.pojo.AssistantMessage2;
-import org.dialectics.ai.agent.domain.pojo.Message2;
+import org.dialectics.ai.agent.domain.pojo.ZAssistantMessage;
+import org.dialectics.ai.agent.domain.pojo.ZMessage;
 import org.dialectics.ai.agent.manager.ToolResultManager;
 import org.dialectics.ai.common.constants.ToolConstant;
 import org.springframework.ai.chat.messages.*;
@@ -23,15 +23,15 @@ public class ChatMessageConverter {
      * @return 符合存储规范的JSON字符串
      */
     public static String toJson(Message message) {
-        Message2 message2 = BeanUtil.toBean(message, Message2.class);
+        ZMessage msg = BeanUtil.copyProperties(message, ZMessage.class);
 
         // 设置消息内容
-        message2.setTextContent(message.getText());
+        msg.setTextContent(message.getText());
 
         if (message instanceof AssistantMessage assistantMessage) {
-            message2.setToolCalls(assistantMessage.getToolCalls());
+            msg.setToolCalls(assistantMessage.getToolCalls());
 
-            // 获取并设置tool调用的结果到params
+            // Tool调用结果处理
             String id = Convert.toStr(message.getMetadata().get("id"));
             if (StrUtil.isNotEmpty(id)) {
                 // 获取<metaData.id>.id.<requestId>
@@ -39,8 +39,8 @@ public class ChatMessageConverter {
                 // 如果存在tool调用，requestId一定不为空
                 if (StrUtil.isNotEmpty(requestId)) {
                     // 获取并设置tool调用的结果
-                    Map<String, Object> params = ToolResultManager.get(requestId);
-                    message2.setParams(params);
+                    Map<String, Object> toolParams = ToolResultManager.get(requestId);
+                    msg.setParams(toolParams);
 
                     ToolResultManager.remove(requestId);
                 }
@@ -48,10 +48,10 @@ public class ChatMessageConverter {
         }
 
         if (message instanceof ToolResponseMessage toolResponseMessage) {
-            message2.setToolResponses(toolResponseMessage.getResponses());
+            msg.setToolResponses(toolResponseMessage.getResponses());
         }
 
-        return JSONUtil.toJsonStr(message2);
+        return JSONUtil.toJsonStr(msg);
     }
 
     /**
@@ -62,14 +62,22 @@ public class ChatMessageConverter {
      * @throws RuntimeException 当无法识别的消息类型时抛出异常
      */
     public static Message toMessage(String json) {
-        Message2 message2 = JSONUtil.toBean(json, Message2.class);
-        MessageType messageType = MessageType.valueOf(message2.getMessageType());
+        ZMessage msg = JSONUtil.toBean(json, ZMessage.class);
+        MessageType messageType = MessageType.valueOf(msg.getMessageType());
 
         return switch (messageType) {
-            case SYSTEM -> new SystemMessage(message2.getTextContent());
-            case USER -> UserMessage.builder().text(message2.getTextContent()).metadata(message2.getMetadata()).media(message2.getMedia()).build();
-            case ASSISTANT -> new AssistantMessage2(message2.getTextContent(), message2.getMetadata(), message2.getToolCalls(), message2.getMedia(), message2.getParams());
-            case TOOL -> new ToolResponseMessage(message2.getToolResponses(), message2.getMetadata());
+            case SYSTEM -> new SystemMessage(msg.getTextContent());
+            case USER -> UserMessage.builder().text(msg.getTextContent()).metadata(msg.getMetadata()).media(msg.getMedia()).build();
+            case ASSISTANT -> new ZAssistantMessage(
+                    msg.getTextContent(),
+                    msg.getMetadata(),
+                    msg.getToolCalls(),
+                    msg.getMedia(),
+                    msg.getParams(),
+                    msg.getSteps(),
+                    msg.getStepCount()
+            );
+            case TOOL -> new ToolResponseMessage(msg.getToolResponses(), msg.getMetadata());
         };
 
     }

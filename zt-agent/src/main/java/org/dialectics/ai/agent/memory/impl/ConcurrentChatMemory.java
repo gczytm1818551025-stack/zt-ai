@@ -1,22 +1,23 @@
 package org.dialectics.ai.agent.memory.impl;
 
+import org.dialectics.ai.agent.memory.ZChatMemory;
+import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
 import org.jetbrains.annotations.NotNull;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.ChatMemoryRepository;
 import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.util.Assert;
 
 import java.util.List;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Function;
 
 /**
  * <h4>线程安全ChatMemory实现
  * <p>对MessageWindowChatMemory进行装饰器增强
  */
-public class ConcurrentChatMemory implements ChatMemory {
+public class ConcurrentChatMemory implements ZChatMemory {
     private final MessageWindowChatMemory messageWindowChatMemory;
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
@@ -24,13 +25,15 @@ public class ConcurrentChatMemory implements ChatMemory {
         this.messageWindowChatMemory = messageWindowChatMemory;
     }
 
-    /**
-     * 添加单条消息（写）
-     */
-    public void add(@NotNull String conversationId, @NotNull Message message) {
-        Assert.hasText(conversationId, "conversationId cannot be null or empty");
-        Assert.notNull(message, "message cannot be null");
-        this.add(conversationId, List.of(message));
+    @Override
+    public void add(String conversationId, ZChatMemoryRepository repository, Function<ZChatMemoryRepository, Message> beforeHandle) {
+        lock.writeLock().lock();
+        try {
+            Message message = beforeHandle.apply(repository);
+            messageWindowChatMemory.add(conversationId, List.of(message));
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     /**

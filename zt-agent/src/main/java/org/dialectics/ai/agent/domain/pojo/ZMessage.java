@@ -9,11 +9,14 @@ import java.util.List;
 import java.util.Map;
 
 @Data
-public class Message2 {
+public class ZMessage {
     // AbstractMessage
     private String messageType;
     private Map<String, Object> metadata = Map.of();
     private String textContent;
+    // ReAct logic
+    private List<Map<String, Object>> steps = List.of();
+    private Integer stepCount = 0;
 
     // AssistantMessage, UserMessage
     private List<Media> media = List.of();
