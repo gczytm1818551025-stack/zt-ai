@@ -1,11 +1,11 @@
-package org.dialectics.ai.agent.agent.impl;
+package org.dialectics.ai.agent.chat;
 
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.domain.vo.ChatEventVo;
 import org.dialectics.ai.agent.manager.ToolResultManager;
 import org.dialectics.ai.agent.memory.ZChatMemory;

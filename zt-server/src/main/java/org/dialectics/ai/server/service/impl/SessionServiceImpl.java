@@ -91,22 +91,13 @@ public class SessionServiceImpl extends ServiceImpl<ChatRecordMapper, ChatRecord
                 List<Map<String, Object>> steps = msg2.getSteps();
                 Integer stepCount = msg2.getStepCount();
 
-                // 判断是否含有ReAct步骤记忆
-                if (CollUtil.isEmpty(steps)) {
-                    result.add(MessageVo.builder()
-                            .type(MessageTypeEnum.ASSISTANT)
-                            .content(msg2.getText())
-                            .steps(steps)
-                            .stepCount(stepCount != null ? stepCount : steps.size())
-                            .params(msg2.getParams())
-                            .build());
-                } else {
-                    result.add(MessageVo.builder()
-                            .type(MessageTypeEnum.ASSISTANT)
-                            .content(msg2.getText())
-                            .params(msg2.getParams())
-                            .build());
-                }
+                result.add(MessageVo.builder()
+                        .type(MessageTypeEnum.ASSISTANT)
+                        .content(msg2.getText())
+                        .steps(steps)
+                        .stepCount(stepCount != null ? stepCount : steps.size())
+                        .params(msg2.getParams())
+                        .build());
             }
         }
 

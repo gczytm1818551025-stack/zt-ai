@@ -5,7 +5,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
 import org.dialectics.ai.agent.domain.pojo.StepTrace;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
@@ -42,7 +42,6 @@ import io.micrometer.core.instrument.Timer;
 
 import static org.dialectics.ai.agent.utils.ChatSessionVisitor.*;
 import static org.dialectics.ai.agent.utils.ReActControlVisitor.*;
-import static org.springframework.ai.openai.api.OpenAiApi.FunctionTool.Type.FUNCTION;
 
 /**
  * ReAct 异步执行器

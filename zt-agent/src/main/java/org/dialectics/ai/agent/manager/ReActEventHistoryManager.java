@@ -71,8 +71,8 @@ public class ReActEventHistoryManager {
         batchWriteExecutor = new ThreadPoolExecutor(
                 1,  // 核心线程数
                 1,  // 最大线程数
-                0L,
-                TimeUnit.MILLISECONDS,
+                STREAM_TTL.toSeconds(),  // 非核心线程存活时间（与STREAM_TTL一致）
+                TimeUnit.SECONDS,       // 使用 SECONDS 作为单位
                 new LinkedBlockingQueue<>(1000),
                 r -> {
                     Thread t = new Thread(r, "react-event-history-writer");

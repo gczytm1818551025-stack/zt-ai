@@ -1,4 +1,4 @@
-package org.dialectics.ai.agent.agent;
+package org.dialectics.ai.agent;
 
 import org.springframework.ai.chat.model.ChatModel;
 

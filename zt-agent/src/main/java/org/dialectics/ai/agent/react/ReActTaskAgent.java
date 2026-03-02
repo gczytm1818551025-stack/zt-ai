@@ -1,21 +1,19 @@
-package org.dialectics.ai.agent.agent.impl;
+package org.dialectics.ai.agent.react;
 
 import cn.hutool.core.collection.CollUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.agent.Agent;
-import org.dialectics.ai.agent.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.Agent;
+import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
 import org.dialectics.ai.agent.memory.ZChatMemory;
 import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
-import org.dialectics.ai.agent.react.ReActFlowOrchestrator;
 import org.dialectics.ai.agent.tools.schema.ToolDomain;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.enums.ChatSessionParamEnum;
 import org.dialectics.ai.common.enums.GenerateTypeEnum;
 import org.dialectics.ai.common.enums.ReActParamEnum;
 import org.dialectics.ai.skills.Skills;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;

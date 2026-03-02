@@ -1,11 +1,11 @@
 package org.dialectics.ai.server.service.impl;
 
-import org.dialectics.ai.agent.agent.AgentFactory;
-import org.dialectics.ai.agent.agent.impl.ChatAgent;
-import org.dialectics.ai.agent.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentFactory;
+import org.dialectics.ai.agent.chat.ChatAgent;
+import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.domain.vo.ChatEventVo;
 import org.dialectics.ai.agent.service.ChatService;
-import org.dialectics.ai.common.enums.AgentTypeEnum;
+import org.dialectics.ai.common.enums.AgentEnum;
 import org.dialectics.ai.common.enums.ChatSessionParamEnum;
 import org.dialectics.ai.common.enums.GenerateTypeEnum;
 import org.dialectics.ai.common.threadlocal.UserContext;
@@ -23,7 +23,7 @@ public class CommonChatServiceImpl implements ChatService {
     @Override
     public Flux<ChatEventVo> chat(String question, String sessionId, GenerateTypeEnum generateType) {
         // 获取对话智能体
-        ChatAgent chatAgent = (ChatAgent) agentFactory.getAgent(AgentTypeEnum.ChatAgent);
+        ChatAgent chatAgent = (ChatAgent) agentFactory.getAgent(AgentEnum.ChatAgent);
         // 构建对话上下文
         AgentExecutionContext context = new AgentExecutionContext();
         String conversationId = ChatService.getConversationId(sessionId, String.valueOf(UserContext.get()));
@@ -40,7 +40,7 @@ public class CommonChatServiceImpl implements ChatService {
 
     @Override
     public void stop(String sessionId) {
-        ((ChatAgent) agentFactory.getAgent(AgentTypeEnum.ChatAgent)).stop(sessionId);
+        ((ChatAgent) agentFactory.getAgent(AgentEnum.ChatAgent)).stop(sessionId);
     }
 
 }

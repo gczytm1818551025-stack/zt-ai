@@ -7,15 +7,15 @@ import lombok.Getter;
  * 智能体类型
  */
 @Getter
-public enum AgentTypeEnum {
+public enum AgentEnum {
     ChatAgent("chatAgent"),
     ReActTaskAgent("reActTaskAgent"),
     ;
 
-    private final String agentName;
+    private final String name;
 
-    AgentTypeEnum(String agentName) {
-        this.agentName = agentName;
+    AgentEnum(String name) {
+        this.name = name;
     }
 
     @Override
@@ -26,7 +26,7 @@ public enum AgentTypeEnum {
     /**
      * 通过智能体的名称查找枚举
      */
-    public static AgentTypeEnum nameOf(String agentName) {
-        return EnumUtil.getBy(AgentTypeEnum::getAgentName, agentName);
+    public static AgentEnum nameOf(String name) {
+        return EnumUtil.getBy(AgentEnum::getName, name);
     }
 }

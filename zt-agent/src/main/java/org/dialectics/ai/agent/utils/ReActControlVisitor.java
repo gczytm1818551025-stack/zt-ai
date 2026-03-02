@@ -1,6 +1,6 @@
 package org.dialectics.ai.agent.utils;
 
-import org.dialectics.ai.agent.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.tools.schema.ToolDomain;
 import org.dialectics.ai.skills.Skills;
 import org.springframework.ai.chat.messages.Message;

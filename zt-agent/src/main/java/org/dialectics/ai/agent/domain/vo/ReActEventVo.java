@@ -6,6 +6,8 @@ import org.dialectics.ai.common.domain.EventVo;
 import org.dialectics.ai.common.enums.EventTypeEnum;
 import org.dialectics.ai.common.enums.ReActStageEnum;
 
+import java.util.Map;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -26,7 +28,7 @@ public class ReActEventVo implements EventVo {
 
     public record PlanData(
             /// 子任务序号
-            int index,
+            Integer index,
             /// 任务截止当前的局部总结
             String previousEvaluation,
             String memory,

@@ -1,6 +1,6 @@
 package org.dialectics.ai.agent.utils;
 
-import org.dialectics.ai.agent.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.common.enums.GenerateTypeEnum;
 
 import static org.dialectics.ai.common.enums.ChatSessionParamEnum.*;

@@ -1,4 +1,4 @@
-package org.dialectics.ai.agent.agent;
+package org.dialectics.ai.agent;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;

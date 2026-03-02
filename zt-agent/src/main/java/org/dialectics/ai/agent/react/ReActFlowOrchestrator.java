@@ -2,7 +2,7 @@ package org.dialectics.ai.agent.react;
 
 import cn.hutool.core.util.StrUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
 import org.dialectics.ai.agent.domain.pojo.ZAssistantMessage;
 import org.dialectics.ai.agent.domain.pojo.StepTrace;
@@ -30,7 +30,6 @@ import reactor.core.scheduler.Scheduler;
 import jakarta.annotation.Resource;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -183,16 +182,7 @@ public class ReActFlowOrchestrator {
         messages.add(SystemMessage.builder().text(PromptManager.renderFrom(PromptNameConstant.REACT_SYSTEM)).build());
 
         // 创建空的AssistantMessage用于流式追加所有步骤内容
-        AssistantMessage emptyAssistantMessage = new ZAssistantMessage(
-                "",             // content
-                Map.of(),              // properties
-                List.of(),             // toolCalls
-                List.of(),             // media
-                Map.of(),              // params
-                new ArrayList<>(),     // steps
-                0                      // stepCount
-        );
-        chatMemory.add(conversationId, emptyAssistantMessage);
+        chatMemory.add(conversationId, new ZAssistantMessage(""));
         log.debug("[{}] 初始化 ReAct 消息: conversationId={}", requestId, conversationId);
 
         // 记录请求开始
@@ -227,9 +217,12 @@ public class ReActFlowOrchestrator {
                                 }),
                         ReActResourceGuard::close
                 ).doFinally(signal -> {
-                    // 发送停止事件
-                    streamManager.tryEmit(sessionId, ReActEventVo.stopEvent());
-                    log.debug("[{}] 停止事件已发送: signal={}", requestId, signal);
+                    // 注意：STOP 事件已在 handleSuccess 中发送，这里不再重复发送
+                    // 确保在失败情况下也发送 STOP 事件
+                    if (!"onComplete".equals(signal.name())) {
+                        streamManager.tryEmit(sessionId, ReActEventVo.stopEvent());
+                        log.debug("[{}] 停止事件已发送: signal={}", requestId, signal);
+                    }
 
                     // 停止计时器并记录指标（如果还未停止）
                     if (timerStopped.compareAndSet(false, true)) {
@@ -301,29 +294,28 @@ public class ReActFlowOrchestrator {
                 .flatMap(observeResult -> {
                     // 发送规划事件
                     StepTrace.Status currentState = observeResult.currentState();
-                    ReActEventVo planEvent = ReActEventVo.newDataEvent(new ReActEventVo.PlanData(
+                    ReActEventVo.PlanData planData = new ReActEventVo.PlanData(
                             taskChain(ctx).size(),
                             currentState.getPreviousEvaluation(),
                             currentState.getMemory(),
                             currentState.getThinking(),
                             observeResult.taskContent()
-                    ), ReActStageEnum.TASK_PLAN);
-                    emitEvent(planEvent, ctx);
+                    );
+                    emitEvent(ReActEventVo.newDataEvent(planData, ReActStageEnum.TASK_PLAN), ctx);
 
                     // 追加规划步骤到对话记忆
-                    ReActEventVo.PlanData planEventData = (ReActEventVo.PlanData) planEvent.getData();
-                    Map<String, Object> planData = Map.of(
-                            "type", 1, // PLAN
+                    Map<String, Object> planDataMap = Map.of(
+                            "type", ReActStageEnum.TASK_PLAN.getCode(),
                             "index", taskChain(ctx).size(),
-                            "taskContent", planEventData.taskContent(),
-                            "previousEvaluation", planEventData.previousEvaluation(),
-                            "memory", planEventData.memory(),
-                            "thinking", planEventData.thinking()
+                            "taskContent", planData.taskContent(),
+                            "previousEvaluation", planData.previousEvaluation(),
+                            "memory", planData.memory(),
+                            "thinking", planData.thinking()
                     );
 
                     chatMemory.add(conversationId, chatMemoryRepository, repository -> {
                         ZAssistantMessage lastMsg = (ZAssistantMessage) repository.findLastByConversationId(conversationId);
-                        lastMsg.addStep(planData);
+                        lastMsg.addStep(planDataMap);
                         repository.deleteLastNByConversationId(conversationId, 1);
                         return lastMsg;
                     });
@@ -347,7 +339,7 @@ public class ReActFlowOrchestrator {
 
                                 // 追加思考步骤到对话记忆
                                 Map<String, Object> thinkDataMap = Map.of(
-                                        "type", 2, // THINKING
+                                        "type", ReActStageEnum.STRATEGY_THINK.getCode(),
                                         "thinkContent", thinkData.thinkContent()
                                 );
 
@@ -363,28 +355,29 @@ public class ReActFlowOrchestrator {
                                 return asyncExecutor.act(thinkResult.thinkResponse(), ctx)
                                         .flatMap(actResult -> {
                                             // 发送行动结果事件
-                                            ReActEventVo.ActionData actionEventData = new ReActEventVo.ActionData(
+                                            ReActEventVo.ActionData actionData = new ReActEventVo.ActionData(
                                                     actResult.success(),
                                                     actResult.result()
                                             );
-                                            ReActEventVo actEvent = ReActEventVo.newDataEvent(actionEventData, ReActStageEnum.ACTION_RESULT);
+                                            ReActEventVo actEvent = ReActEventVo.newDataEvent(actionData, ReActStageEnum.ACTION_RESULT);
                                             emitEvent(actEvent, ctx);
 
                                             // 追加行动步骤到对话记忆
-                                            Map<String, Object> actionData = Map.of(
-                                                    "type", 3, // ACTION
-                                                    "success", actionEventData.success(),
-                                                    "result", actionEventData.result(),
+                                            Map<String, Object> actionDataMap = Map.of(
+                                                    "type", ReActStageEnum.ACTION_RESULT.getCode(),
+                                                    "success", actionData.success(),
+                                                    "result", actionData.result(),
                                                     "resultType", 1 // 默认为文本类型
                                             );
 
                                             chatMemory.add(conversationId, chatMemoryRepository, repository -> {
                                                 ZAssistantMessage lastMsg = (ZAssistantMessage) repository.findLastByConversationId(conversationId);
-                                                lastMsg.addStep(actionData);
+                                                lastMsg.addStep(actionDataMap);
+                                                lastMsg.incrementStepCount(); // act步骤结束代表完整一步执行完毕，步数+1
                                                 repository.deleteLastNByConversationId(conversationId, 1);
                                                 return lastMsg;
                                             });
-                                            log.debug("[{}] 追加行动步骤: success={}", requestId(ctx), actionEventData.success());
+                                            log.debug("[{}] 追加行动步骤: success={}", requestId(ctx), actionData.success());
 
                                             // observe-think-act单步完成，增加步数
                                             stepCount(ctx).incrementAndGet();
@@ -402,18 +395,6 @@ public class ReActFlowOrchestrator {
     }
 
     /**
-     * 追加ReAct步骤记忆
-     */
-    private void pushReActStepMemory(String conversationId, Map<String, Object> data) {
-        chatMemory.add(conversationId, chatMemoryRepository, repository -> {
-            ZAssistantMessage lastMsg = (ZAssistantMessage) repository.findLastByConversationId(conversationId);
-            lastMsg.addStep(data);
-            repository.deleteLastNByConversationId(conversationId, 1);
-            return lastMsg;
-        });
-    }
-
-    /**
      * 处理成功
      */
     private void handleSuccess(AgentExecutionContext ctx, Timer.Sample totalTimer) {
@@ -426,14 +407,21 @@ public class ReActFlowOrchestrator {
             log.warn("[{}] 任务最终结果为空", requestId(ctx));
             finalResult = "任务已中断";
         }
+
+        // 先发送最终结果事件（FINAL_SUMMARY）
         ReActEventVo finalResultEvent = ReActEventVo.newDataEvent(new ReActEventVo.FinalData((String) finalResult), ReActStageEnum.FINAL_SUMMARY);
         emitEvent(finalResultEvent, ctx);
+        log.info("[{}] FINAL_SUMMARY 事件已发送: finalResult={}", requestId(ctx), finalResult);
+
+        // 再发送停止事件（确保 FINAL_SUMMARY 先到达前端）
+        streamManager.tryEmit(sessionId(ctx), ReActEventVo.stopEvent());
+        log.info("[{}] STOP 事件已发送", requestId(ctx));
 
         // 追加最终结果到对话记忆
         final Object ffResult = finalResult;
         chatMemory.add(conversationId(ctx), chatMemoryRepository, repository -> {
             ZAssistantMessage lastMsg = (ZAssistantMessage) chatMemoryRepository.findLastByConversationId(conversationId(ctx));
-            ZAssistantMessage updatedMsg = new ZAssistantMessage(
+            AssistantMessage updatedMsg = new ZAssistantMessage(
                     (String) ffResult, // 更新content（AssistantMessage的content不可变）
                     lastMsg.getMetadata(),
                     lastMsg.getToolCalls(),
@@ -479,7 +467,7 @@ public class ReActFlowOrchestrator {
             ZAssistantMessage lastMsg = (ZAssistantMessage) chatMemoryRepository.findLastByConversationId(conversationId(ctx));
             // 追加错误信息到 content
             String currentContent = lastMsg.getText() != null ? lastMsg.getText() + errorMsg : "";
-            ZAssistantMessage updatedMsg = new ZAssistantMessage(
+            AssistantMessage updatedMsg = new ZAssistantMessage(
                     currentContent,
                     lastMsg.getMetadata(),
                     lastMsg.getToolCalls(),
@@ -496,14 +484,23 @@ public class ReActFlowOrchestrator {
 
     // ==================== 辅助方法 ====================
 
+    /**
+     * 发送事件
+     * @param event 事件对象
+     * @param ctx 执行上下文
+     */
     private void emitEvent(ReActEventVo event, AgentExecutionContext ctx) {
         try {
             boolean success = streamManager.tryEmit(sessionId(ctx), event);
             if (!success) {
-                log.warn("[{}] 事件发送失败: type={}", requestId(ctx), event.getType());
+                log.warn("[{}] 事件发送失败: type={}, stage={}", requestId(ctx), event.getType(), event.getStage());
+            } else {
+                log.debug("[{}] 事件发送成功: type={}, stage={}, seq={}",
+                        requestId(ctx), event.getType(), event.getStage(), event.getSequenceNumber());
             }
         } catch (Exception e) {
-            log.error("[{}] {}事件发送异常: stage={}, error={}", requestId(ctx), event.getType(), event.getStage(), e.getMessage(), e);
+            log.error("[{}] 事件发送异常: type={}, stage={}, error={}",
+                    requestId(ctx), event.getType(), event.getStage(), e.getMessage(), e);
         }
     }
 

@@ -1,7 +1,7 @@
-package org.dialectics.ai.agent.agent.impl;
+package org.dialectics.ai.agent.chat;
 
-import org.dialectics.ai.agent.agent.Agent;
-import org.dialectics.ai.agent.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.Agent;
+import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.domain.EventVo;
 import org.springframework.ai.chat.client.ChatClient;

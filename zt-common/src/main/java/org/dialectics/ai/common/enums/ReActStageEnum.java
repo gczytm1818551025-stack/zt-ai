@@ -1,7 +1,6 @@
 package org.dialectics.ai.common.enums;
 
 import com.fasterxml.jackson.annotation.JsonValue;
-import lombok.Data;
 import lombok.Getter;
 
 @Getter
@@ -12,17 +11,15 @@ public enum ReActStageEnum {
     STRATEGY_THINK(1, "策略思考内容"),
     /// 行动结果
     ACTION_RESULT(2, "行动结果"),
-    /// 反思内容
-    REFLECT(3, "反思内容"),
     /// 最终总结
-    FINAL_SUMMARY(4, "最终总结");
+    FINAL_SUMMARY(3, "最终总结");
 
     @JsonValue
-    private final int value;
+    private final int code;
     private final String desc;
 
-    ReActStageEnum(int value, String desc) {
-        this.value = value;
+    ReActStageEnum(int code, String desc) {
+        this.code = code;
         this.desc = desc;
     }
 }
