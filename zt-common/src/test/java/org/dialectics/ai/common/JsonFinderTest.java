@@ -29,7 +29,7 @@ class JsonFinderTest {
                 ## 返回值规则
                 返回值结构只能如下：
                 {
-                    "currentState": {
+                    "stepTrace": {
                        "previousEvaluation": "Success|Failed",
                        "memory": "已执行事项",
                        "thinking": "模拟人类思考，包含引号内容 \\"心情愉悦\\""
@@ -42,7 +42,7 @@ class JsonFinderTest {
                 """;
         String json = JsonFinder.findFirst(input);
         // 注意：解析器会保留原始文本中的换行和缩进
-        String expected = "{\n    \"currentState\": {\n       \"previousEvaluation\": \"Success|Failed\",\n       \"memory\": \"已执行事项\",\n       \"thinking\": \"模拟人类思考，包含引号内容 \\\"心情愉悦\\\"\"\n    },\n    \"action\": [{\"print\": { \"content\": \"hello\" }}]\n}";// 4. 断言验证
+        String expected = "{\n    \"stepTrace\": {\n       \"previousEvaluation\": \"Success|Failed\",\n       \"memory\": \"已执行事项\",\n       \"thinking\": \"模拟人类思考，包含引号内容 \\\"心情愉悦\\\"\"\n    },\n    \"action\": [{\"print\": { \"content\": \"hello\" }}]\n}";// 4. 断言验证
         assertNotNull(json, "解析结果不应为空");
         assertEquals(expected, json, "提取的 JSON 内容必须与预期完全匹配");
         StepTrace stepTrace = JSON.parseObject(json, StepTrace.class);
@@ -55,7 +55,7 @@ class JsonFinderTest {
     @NoArgsConstructor
     @AllArgsConstructor
     static class StepTrace {
-        private Status currentState;
+        private Status stepTrace;
         private List<Map<String, Object>> action;
 
         @Data
@@ -69,7 +69,7 @@ class JsonFinderTest {
         }
 
         public static StepTrace noAction(AssistantMessage thinking, List<Message> history) {
-            return StepTrace.builder().action(List.of()).currentState(Status.builder().memory(history.toString()).thinking(thinking.getText()).previousEvaluation("不确定").build()).build();
+            return StepTrace.builder().action(List.of()).stepTrace(Status.builder().memory(history.toString()).thinking(thinking.getText()).previousEvaluation("不确定").build()).build();
         }
     }
 

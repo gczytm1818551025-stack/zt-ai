@@ -5,16 +5,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
 import org.dialectics.ai.agent.service.EventHistoryService;
 import org.dialectics.ai.common.base.StreamManager;
-import org.dialectics.ai.common.constants.RedisConstant;
-import org.dialectics.ai.common.utils.RedisRetryUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;

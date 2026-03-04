@@ -17,24 +17,25 @@ import java.util.Map;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class StepTrace {
-    private Status currentState;
-    private List<Map<String, Object>> action;
+public class ReActOutput {
+    private StepTrace stepTrace;
+    /// toolName : tool的参数键值对Map
+    private List<Map<String, Map<String, Object>>> action;
 
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
     @Builder
-    public static class Status {
+    public static class StepTrace {
         private String previousEvaluation;
         private String thinking;
         private String memory;
     }
 
-    public static StepTrace noAction(AssistantMessage thinking, List<Message> history) {
-        return StepTrace.builder()
+    public static ReActOutput noAction(AssistantMessage thinking, List<Message> history) {
+        return ReActOutput.builder()
                 .action(List.of())
-                .currentState(Status.builder()
+                .stepTrace(StepTrace.builder()
                         .memory(history.toString())
                         .thinking(thinking.getText())
                         .previousEvaluation("不确定")

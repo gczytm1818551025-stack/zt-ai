@@ -43,7 +43,7 @@ public class SessionServiceImpl extends ServiceImpl<ChatRecordMapper, ChatRecord
     @Autowired
     private ChatMemory chatMemory;
     @Resource
-    private ChatClient summaryClient;
+    private ChatClient mainChatClient;
 
     @Override
     public SessionVo createSession(SessionCreateDto dto) {
@@ -120,7 +120,7 @@ public class SessionServiceImpl extends ServiceImpl<ChatRecordMapper, ChatRecord
         // 2.如果会话标题为默认则生成会话标题
         if (StrUtil.equals(ChatRecord.defaultTitle(session.getSessionType()), session.getTitle())
                 && StrUtil.isNotEmpty(question) && StrUtil.isNotEmpty(response)) {
-            String t = summaryClient.prompt()
+            String t = mainChatClient.prompt()
                     .system(PromptManager.renderFrom(PromptNameConstant.TITLE_SUMMARY))
                     .user(getSummaryUserPrompt(question, response))
                     .call()

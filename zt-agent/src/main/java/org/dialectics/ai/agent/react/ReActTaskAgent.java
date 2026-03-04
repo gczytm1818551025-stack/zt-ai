@@ -1,14 +1,14 @@
 package org.dialectics.ai.agent.react;
 
-import cn.hutool.core.collection.CollUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.Agent;
 import org.dialectics.ai.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.domain.pojo.ReActOutput;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
 import org.dialectics.ai.agent.memory.ZChatMemory;
 import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
-import org.dialectics.ai.agent.tools.schema.ToolDomain;
+import org.dialectics.ai.agent.tools.ReActOutputTool;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.enums.ChatSessionParamEnum;
 import org.dialectics.ai.common.enums.GenerateTypeEnum;
@@ -18,22 +18,22 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.support.ToolCallbacks;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.ai.tool.method.MethodToolCallback;
+import org.springframework.ai.tool.support.ToolDefinitions;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.util.ReflectionUtils;
 import reactor.core.publisher.Flux;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.lang.reflect.Method;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.stream.Stream;
 
 import static org.dialectics.ai.agent.utils.ReActControlVisitor.completed;
 import static org.dialectics.ai.common.enums.ReActParamEnum.*;
@@ -60,8 +60,6 @@ import static org.dialectics.ai.common.enums.ReActParamEnum.*;
 public class ReActTaskAgent implements Agent {
     @Autowired
     private ReActFlowOrchestrator orchestrator;
-    @Value("${zt-ai.tools.inputSchemaLocation}")
-    private String inputSchemaLocation;
     @Autowired
     private ZChatMemory chatMemory;
     @Autowired
@@ -104,7 +102,7 @@ public class ReActTaskAgent implements Agent {
         // 1. 初始化 ReAct 基础参数
         initReActAttributes(task, context);
         // 2. 加载工具链容器
-        initToolAndSkills(context);
+        loadReActTools(context);
         // 3. 委托给编排器执行
         return orchestrator.orchestrate(task, context);
     }
@@ -141,14 +139,20 @@ public class ReActTaskAgent implements Agent {
     /**
      * 初始化工具链容器
      */
-    private void initToolAndSkills(AgentExecutionContext context) {
-        ToolDomain toolDomain = ToolDomain.builder()
-                .template(inputSchemaLocation)
-                .toolProviders(mainToolProviders(context))
+    private void loadReActTools(AgentExecutionContext ctx) {
+        ReActOutputTool reActOutputTool = new ReActOutputTool(toolCallbacks(ctx));
+        Method toolMethod = ReflectionUtils.findMethod(ReActOutputTool.class, "apply", ReActOutput.StepTrace.class, List.class);
+        ToolCallback tool = MethodToolCallback.builder()
+                .toolObject(reActOutputTool)
+                .toolMethod(toolMethod)
+                .toolDefinition(ToolDefinitions.builder(toolMethod)
+                        // 显式指定增强后的inputSchema，不使用默认
+                        .inputSchema(reActOutputTool.getInputSchema())
+                        .build())
                 .build();
-        context.set(TOOL_DOMAIN, toolDomain);
-        log.debug("工具域加载完成: toolDomainName={}", toolDomain.name());
-        context.set(SKILLS, skills);
+        ctx.set(TOOL_CALLBACK, tool);
+        ctx.set(ACTIONS, reActOutputTool.getActions());
+        log.debug("工具域加载完成: toolDomainName={}", tool.getToolDefinition().name());
     }
 
     /**
@@ -156,19 +160,18 @@ public class ReActTaskAgent implements Agent {
      * <p>
      * 包含 Done 和 Plan 工具，以及所有注册的工具提供者
      *
-     * @param context 执行上下文
+     * @param ctx 执行上下文
      * @return 工具提供者列表
      */
-    private List<ToolCallbackProvider> mainToolProviders(AgentExecutionContext context) {
-        List<ToolCallbackProvider> doneToolProvider = List.of(() -> ToolCallbacks.from(
-                new DoneTools(context),
+    private List<ToolCallback> toolCallbacks(AgentExecutionContext ctx) {
+        List<ToolCallback> toolCallbacks = new ArrayList<>(Arrays.asList(ToolCallbacks.from(
+                new DoneTools(ctx),
                 new PlanTools()
-        ));
-
-        if (CollUtil.isNotEmpty(toolCallbackProviders)) {
-            return Stream.concat(doneToolProvider.stream(), toolCallbackProviders.stream()).toList();
+        )));
+        for (ToolCallbackProvider provider : toolCallbackProviders) {
+            toolCallbacks.addAll(Arrays.asList(provider.getToolCallbacks()));
         }
-        return doneToolProvider;
+        return toolCallbacks;
     }
 
     /**

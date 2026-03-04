@@ -1,7 +1,6 @@
 package org.dialectics.ai.server.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.AgentFactory;
 import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.react.ReActTaskAgent;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
@@ -9,7 +8,6 @@ import org.dialectics.ai.agent.manager.ReActStreamManager;
 import org.dialectics.ai.agent.service.ChatService;
 import org.dialectics.ai.common.constants.RedisConstant;
 import org.dialectics.ai.common.utils.RedisRetryUtils;
-import org.dialectics.ai.common.enums.AgentEnum;
 import org.dialectics.ai.common.enums.ChatSessionParamEnum;
 import org.dialectics.ai.common.enums.GenerateTypeEnum;
 import org.dialectics.ai.common.threadlocal.UserContext;
@@ -24,7 +22,7 @@ import java.util.Map;
 @Service("reActChatService")
 public class ReActChatServiceImpl implements ChatService {
     @Autowired
-    private AgentFactory agentFactory;
+    private ReActTaskAgent reActTaskAgent;
     @Autowired
     private ReActStreamManager streamManager;
     @Autowired
@@ -32,8 +30,6 @@ public class ReActChatServiceImpl implements ChatService {
 
     @Override
     public Flux<ReActEventVo> chat(String question, String sessionId, GenerateTypeEnum generateType) {
-        // 获取ReAct任务智能体
-        ReActTaskAgent reActTaskAgent = (ReActTaskAgent) agentFactory.getAgent(AgentEnum.ReActTaskAgent);
         // 构建对话上下文
         AgentExecutionContext context = new AgentExecutionContext();
         String conversationId = ChatService.getConversationId(sessionId, String.valueOf(UserContext.get()));

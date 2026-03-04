@@ -1,13 +1,15 @@
 package org.dialectics.ai.agent.utils;
 
 import org.dialectics.ai.agent.AgentExecutionContext;
-import org.dialectics.ai.agent.tools.schema.ToolDomain;
-import org.dialectics.ai.skills.Skills;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.tool.ToolCallback;
+
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Function;
 
 import static org.dialectics.ai.common.enums.ReActParamEnum.*;
 
@@ -37,12 +39,12 @@ public class ReActControlVisitor {
         return context.get(SUB_RESULT_CHAIN);
     }
 
-    public static ToolDomain toolDomain(AgentExecutionContext context) {
-        return context.get(TOOL_DOMAIN);
+    public static ToolCallback toolCallback(AgentExecutionContext context) {
+        return context.get(TOOL_CALLBACK);
     }
 
-    public static Skills skills(AgentExecutionContext context) {
-        return context.get(SKILLS);
+    public static Map<String, Function<Map<String, Object>, String>> actions(AgentExecutionContext context) {
+        return context.get(ACTIONS);
     }
 
     public static AtomicBoolean completed(AgentExecutionContext context) {

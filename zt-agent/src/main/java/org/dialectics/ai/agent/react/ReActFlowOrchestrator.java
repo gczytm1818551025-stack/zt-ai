@@ -5,7 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
 import org.dialectics.ai.agent.domain.pojo.ZAssistantMessage;
-import org.dialectics.ai.agent.domain.pojo.StepTrace;
+import org.dialectics.ai.agent.domain.pojo.ReActOutput;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
 import org.dialectics.ai.agent.manager.PromptManager;
 import org.dialectics.ai.agent.manager.ReActStreamManager;
@@ -293,12 +293,12 @@ public class ReActFlowOrchestrator {
         return asyncExecutor.observe(ctx)
                 .flatMap(observeResult -> {
                     // 发送规划事件
-                    StepTrace.Status currentState = observeResult.currentState();
+                    ReActOutput.StepTrace stepTrace = observeResult.stepTrace();
                     ReActEventVo.PlanData planData = new ReActEventVo.PlanData(
                             taskChain(ctx).size(),
-                            currentState.getPreviousEvaluation(),
-                            currentState.getMemory(),
-                            currentState.getThinking(),
+                            stepTrace.getPreviousEvaluation(),
+                            stepTrace.getMemory(),
+                            stepTrace.getThinking(),
                             observeResult.taskContent()
                     );
                     emitEvent(ReActEventVo.newDataEvent(planData, ReActStageEnum.TASK_PLAN), ctx);
@@ -331,8 +331,8 @@ public class ReActFlowOrchestrator {
                                 if (StrUtil.isEmpty(stepTraceJson)) {
                                     thinkData = new ReActEventVo.ThinkData(StrUtil.isEmpty(thinkingText) ? "暂无详细思考" : thinkingText);
                                 } else {
-                                    StepTrace stepTrace = JSON.parseObject(stepTraceJson, StepTrace.class);
-                                    thinkData = new ReActEventVo.ThinkData(stepTrace.getCurrentState().getThinking());
+                                    ReActOutput reActOutput = JSON.parseObject(stepTraceJson, ReActOutput.class);
+                                    thinkData = new ReActEventVo.ThinkData(reActOutput.getStepTrace().getThinking());
                                 }
                                 ReActEventVo thinkEvent = ReActEventVo.newDataEvent(thinkData, ReActStageEnum.STRATEGY_THINK);
                                 emitEvent(thinkEvent, ctx);

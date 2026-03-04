@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.transport.HttpClientSseClientTransport;
 import io.modelcontextprotocol.json.jackson.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.spec.McpClientTransport;
+import org.springframework.ai.mcp.client.common.autoconfigure.NamedClientMcpTransport;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -22,15 +23,16 @@ public class McpConfig {
      * MCP SSE服务注册
      */
     @Bean
-    public List<McpClientTransport> mcpClientTransports(Environment environment) {
+    public List<NamedClientMcpTransport> mcpClientTransports(Environment environment) {
         return List.of(
-                amapMcpTransport(environment)
+                new NamedClientMcpTransport("amap-sse", amapMcpTransport(environment))
         );
     }
 
     private McpClientTransport amapMcpTransport(Environment environment) {
         return HttpClientSseClientTransport.builder("https://mcp.amap.com")
                 .sseEndpoint("/sse?key=" + environment.getProperty("AMAP_KEY"))
+//                .sseEndpoint("/sse?key=79ec069a496264ef1c51ad46c2e65e80")
                 .jsonMapper(new JacksonMcpJsonMapper(new ObjectMapper()))
                 .build();
     }

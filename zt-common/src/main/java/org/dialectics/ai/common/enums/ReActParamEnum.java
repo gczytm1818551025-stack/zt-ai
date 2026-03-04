@@ -9,10 +9,10 @@ public enum ReActParamEnum {
     MESSAGE_MEMORY,
     TASK_CHAIN,
     SUB_RESULT_CHAIN,
-    /// ReAct工具链容器
-    TOOL_DOMAIN,
-    /// 持有的skills容器
-    SKILLS,
+    /// ReAct工具回调对象
+    TOOL_CALLBACK,
+    /// 工具回调的函数句柄列表
+    ACTIONS,
     COMPLETED,
     FINAL_RESULT,
     TOKEN_COUNTER,

@@ -1,31 +1,28 @@
 package org.dialectics.ai.agent.react;
 
-import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.alibaba.cloud.ai.dashscope.spec.DashScopeApiSpec;
 import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
-import org.dialectics.ai.agent.domain.pojo.StepTrace;
+import org.dialectics.ai.agent.domain.pojo.ReActOutput;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
+import org.dialectics.ai.agent.tools.ReActOutputTool;
+import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.exception.ReActExecutionException;
 import org.dialectics.ai.agent.manager.PromptManager;
-import org.dialectics.ai.agent.tools.schema.ToolDomain;
 import org.dialectics.ai.common.constants.PromptNameConstant;
 import org.dialectics.ai.common.utils.JsonFinder;
 import org.dialectics.ai.common.utils.RenderUtil;
-import org.dialectics.ai.common.enums.ToolActionTypeEnum;
 import org.dialectics.ai.skills.Skills;
-import org.jetbrains.annotations.NotNull;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
-import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
@@ -37,10 +34,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 import io.micrometer.core.instrument.Timer;
 
-import static org.dialectics.ai.agent.utils.ChatSessionVisitor.*;
 import static org.dialectics.ai.agent.utils.ReActControlVisitor.*;
 
 /**
@@ -62,9 +59,7 @@ import static org.dialectics.ai.agent.utils.ReActControlVisitor.*;
 @Component
 public class ReActAsyncExecutor {
     @Resource(name = "dashScopeChatModel")
-    private ChatModel mainModel;
-    @Resource(name = "openAiChatModel")
-    private ChatModel planModel;
+    private ChatModel mainModel; // 暂时仅使用同一个模型
     @Autowired
     private Skills skills;
 
@@ -86,7 +81,7 @@ public class ReActAsyncExecutor {
      * @return ObserveResult 的 Mono
      */
     public Mono<ObserveResult> observe(AgentExecutionContext ctx) {
-        String conversationId = conversationId(ctx);
+        String conversationId = ChatSessionVisitor.conversationId(ctx);
         List<Message> messages = messageMemory(ctx);
         return Mono.fromCallable(() -> {
                     Timer.Sample timer = metrics.startObserveTimer();
@@ -112,7 +107,7 @@ public class ReActAsyncExecutor {
      * observe阶段同步流程
      */
     private ObserveResult doObserve(List<Message> messages, AgentExecutionContext ctx) {
-        String conversationId = conversationId(ctx);
+        String conversationId = ChatSessionVisitor.conversationId(ctx);
         // 刷新历史任务记忆，重装系统提示并装配新的任务
         flushMessagesForNewTaskNode(messages, ctx);
 
@@ -135,11 +130,11 @@ public class ReActAsyncExecutor {
         // 检查终止标志并添加终止提示
         if (terminatedFlag(ctx).get()) {
             messages.add(UserMessage.builder().text(terminateText()).build());
-            log.debug("[{}] 终止提示已恢复到 messages: conversationId={}", requestId(ctx), conversationId);
+            log.debug("[{}] 终止提示已恢复到 messages: conversationId={}", ChatSessionVisitor.requestId(ctx), conversationId);
         }
 
-        ToolDomain toolDomain = toolDomain(ctx);
-        ChatResponse chatResponse = doCallLLM(planModel, messages, toolDomain);
+        ToolCallback toolCallback = toolCallback(ctx);
+        ChatResponse chatResponse = doCallLLM(mainModel, messages, toolCallback);
 
         // 统计 token
         if (chatResponse.getMetadata().getUsage() != null) {
@@ -149,25 +144,16 @@ public class ReActAsyncExecutor {
             log.info("[{}] 任务规划后消耗总token数：{}", conversationId, tokenCounter(ctx).sum());
         }
 
-        // 解析获得大模型意图
-        StepTrace stepTrace = parseStepTrace(chatResponse.getResult().getOutput(), messages, toolDomain);
-        TaskNode nextNode = null;
+        ReActOutput reActOutput = parseStepTrace(chatResponse.getResult().getOutput(), messages, toolCallback);
+        String resultJson = toolCallback.call(JSON.toJSONString(reActOutput));
 
-        for (Map<String, Object> action : stepTrace.getAction()) {
-            String actionName = action.keySet().stream().findFirst().orElseThrow();
-            // 使用枚举进行工具动作类型判断，提高代码健壮性
-            if (ToolActionTypeEnum.fromActionName(actionName).isGenerateNext()) {
-                String nodeStr = toolDomain.actions().get(actionName)
-                        .apply(BeanUtil.beanToMap(action.get(actionName)));
-                nextNode = JSON.parseObject(nodeStr, TaskNode.class);
-                break;
-            }
+        // 解析大模型的子任务规划意图
+        ReActOutputTool.Result planResult = JSON.parseObject(resultJson, ReActOutputTool.Result.class);
+        if (!planResult.success()) {
+            throw new ReActExecutionException("子任务规划失败");
         }
-
-        if (nextNode == null) {
-            throw new ReActExecutionException("规划子任务的动作未找到，子任务规划失败");
-        }
-        nextNode.setThinking(stepTrace.getCurrentState().getThinking());
+        TaskNode nextNode = JSON.parseObject(JsonFinder.findFirst(planResult.resultContent()), TaskNode.class);
+        nextNode.setThinking(reActOutput.getStepTrace().getThinking());
         taskChain(ctx).add(nextNode);
         log.info("[{}] 成功规划子任务: {}", conversationId, nextNode);
 
@@ -189,7 +175,7 @@ public class ReActAsyncExecutor {
                 )
         )).build());
 
-        return new ObserveResult(nextNode.getTaskContent(), stepTrace.getCurrentState());
+        return new ObserveResult(nextNode.getTaskContent(), reActOutput.getStepTrace());
     }
 
     /**
@@ -201,17 +187,17 @@ public class ReActAsyncExecutor {
      * @return ThinkResult 的 Mono
      */
     public Mono<ThinkResult> think(AgentExecutionContext context) {
-        String conversationId = conversationId(context);
-        ToolDomain toolDomain = toolDomain(context);
+        String conversationId = ChatSessionVisitor.conversationId(context);
+        ToolCallback toolCallback = toolCallback(context);
         List<Message> messages = messageMemory(context);
 
         return Mono.fromCallable(() -> {
                     Timer.Sample timer = metrics.startThinkTimer();
                     try {
-                        ChatResponse chatResponse = doCallLLM(mainModel, messages, toolDomain);
+                        ChatResponse chatResponse = doCallLLM(mainModel, messages, toolCallback);
 
                         // 统计 token
-                        if (chatResponse.getMetadata() != null && chatResponse.getMetadata().getUsage() != null) {
+                        if (chatResponse.getMetadata().getUsage() != null) {
                             long tokens = chatResponse.getMetadata().getUsage().getTotalTokens();
                             tokenCounter(context).add(tokens);
                             metrics.recordTokenConsumption(tokens);
@@ -243,7 +229,7 @@ public class ReActAsyncExecutor {
      * @return ActResult 的 Mono
      */
     public Mono<ActResult> act(ChatResponse thinkResponse, AgentExecutionContext context) {
-        String conversationId = conversationId(context);
+        String conversationId = ChatSessionVisitor.conversationId(context);
         List<Message> messages = messageMemory(context);
         return Mono.fromCallable(() -> {
                     Timer.Sample timer = metrics.startActTimer();
@@ -269,28 +255,32 @@ public class ReActAsyncExecutor {
      * act同步流程
      */
     private ActResult doAct(ChatResponse thinkResponse, List<Message> messages, AgentExecutionContext context) {
-        ToolDomain toolDomain = toolDomain(context);
-        StringBuilder trBuilder = new StringBuilder();
+        ToolCallback toolCallback = toolCallback(context);
         AssistantMessage assistantMessage = thinkResponse.getResult().getOutput();
         List<AssistantMessage.ToolCall> toolCalls = assistantMessage.getToolCalls();
-        boolean success;
+        StringBuilder trBuilder = new StringBuilder();
 
+        boolean success;
         if (CollUtil.isNotEmpty(toolCalls)) {
             AssistantMessage.ToolCall tool = toolCalls.get(0);
             String toolName = tool.name();
 
-            // 使用辅助方法判断是否为域工具（虚拟主工具）
-            if (isDomainTool(toolName, toolDomain)) {
-                StepTrace stepTrace = parseStepTrace(thinkResponse.getResult().getOutput(), messages, toolDomain);
-                success = callDomainedTool(stepTrace, toolDomain, trBuilder);
+            if (hasReActToolCall(toolName, toolCallback)) {
+                ReActOutput reActOutput = parseStepTrace(thinkResponse.getResult().getOutput(), messages, toolCallback);
+                ReActOutputTool.Result toolResult = callReActTool(reActOutput, toolCallback);
+                success = toolResult.success();
+                trBuilder.append(toolResult.resultContent());
             } else {
-                success = callSkillTool(toolDomain, trBuilder, toolCalls);
+                Map<String, Function<Map<String, Object>, String>> actions = actions(context);
+                success = callSkillTool(actions, trBuilder, toolCalls);
             }
         } else {
             String stepTraceJson = JsonFinder.findFirst(assistantMessage.getText());
             if (StrUtil.isNotEmpty(stepTraceJson)) {
-                StepTrace stepTrace = JSON.parseObject(stepTraceJson, StepTrace.class);
-                success = callDomainedTool(stepTrace, toolDomain, trBuilder);
+                ReActOutput reActOutput = JSON.parseObject(stepTraceJson, ReActOutput.class);
+                ReActOutputTool.Result toolResult = callReActTool(reActOutput, toolCallback);
+                success = toolResult.success();
+                trBuilder.append(toolResult.resultContent());
             } else {
                 // 根据LLM返回的文本内容判断是否真的失败
                 String assistantText = assistantMessage.getText();
@@ -325,27 +315,16 @@ public class ReActAsyncExecutor {
 
     /**
      * 执行 LLM 调用（同步方法）
+     *
      * <p>
      * 私有方法，由 callLLMAsync 异步调用
      */
-    private ChatResponse doCallLLM(ChatModel model, List<Message> messages, ToolDomain toolDomain) {
+    private ChatResponse doCallLLM(ChatModel model, List<Message> messages, org.springframework.ai.tool.ToolCallback toolCallback) {
         return model.call(Prompt.builder()
                 .messages(messages)
-                .chatOptions(OpenAiChatOptions.builder()
-                        .toolCallbacks(new ToolCallback() {
-                            @NotNull
-                            @Override
-                            public ToolDefinition getToolDefinition() {
-                                return toolDomain;
-                            }
-
-                            @NotNull
-                            @Override
-                            public String call(@NotNull String toolInput) {
-                                throw new UnsupportedOperationException(toolDomain.name() + " is a virtual tool, please call action domain in this virtual tool");
-                            }
-                        })
-                        .toolChoice(OpenAiApi.ChatCompletionRequest.ToolChoiceBuilder.function(toolDomain.name()))
+                .chatOptions(DashScopeChatOptions.builder()
+                        .toolCallbacks(List.of(toolCallback))
+                        .toolChoice(DashScopeApiSpec.ChatCompletionRequestParameter.ToolChoiceBuilder.function(toolCallback.getToolDefinition().name()))
                         .internalToolExecutionEnabled(false)
                         .build())
                 .build());
@@ -354,7 +333,7 @@ public class ReActAsyncExecutor {
     /**
      * 调用特定技能工具链，拼接调用结果
      */
-    private boolean callSkillTool(ToolDomain toolDomain, StringBuilder trBuilder, List<AssistantMessage.ToolCall> tools) {
+    private boolean callSkillTool(Map<String, Function<Map<String, Object>, String>> actions, StringBuilder trBuilder, List<AssistantMessage.ToolCall> tools) {
         boolean success = true;
         Timer.Sample timer = metrics.startToolCallTimer();
         try {
@@ -362,7 +341,7 @@ public class ReActAsyncExecutor {
                 String toolName = tool.name();
                 String arguments = tool.arguments();
                 try {
-                    String result = toolDomain.actions().get(toolName).apply(JSON.parseObject(arguments));
+                    String result = actions.get(toolName).apply(JSON.parseObject(arguments));
                     trBuilder.append(toolName).append("动作执行成功，结果为：").append(result).append("\n");
                 } catch (Exception e) {
                     trBuilder.append(toolName).append("动作执行出错，报错为：").append(e.getMessage()).append("\n");
@@ -379,30 +358,15 @@ public class ReActAsyncExecutor {
     /**
      * 调用虚拟主工具，拼接调用结果
      */
-    private boolean callDomainedTool(StepTrace stepTrace, ToolDomain toolDomain, StringBuilder trBuilder) {
-        boolean success = true;
+    private ReActOutputTool.Result callReActTool(ReActOutput reActOutput, ToolCallback toolCallback) {
         Timer.Sample timer = metrics.startToolCallTimer();
         try {
-            if (CollUtil.isNotEmpty(stepTrace.getAction())) {
-                for (Map<String, Object> action : stepTrace.getAction()) {
-                    String actionName = action.keySet().stream().findFirst().orElseThrow();
-                    try {
-                        String result = toolDomain.actions().get(actionName)
-                                .apply(BeanUtil.beanToMap(action.get(actionName)));
-                        trBuilder.append(actionName).append("动作执行成功，结果为：").append(result).append("\n");
-                    } catch (Exception e) {
-                        trBuilder.append(actionName).append("动作执行出错，报错为：").append(e.getMessage()).append("\n");
-                        log.error("调用的action工具 {} 执行出错：{}", actionName, e.getStackTrace());
-                        success = false;
-                    }
-                }
-            } else {
-                return false;
-            }
+            String resultJson = toolCallback.call(JSON.toJSONString(reActOutput));
+            ReActOutputTool.Result toolResult = JSON.parseObject(resultJson, ReActOutputTool.Result.class);
+            return toolResult;
         } finally {
             metrics.recordToolCallDuration(timer);
         }
-        return success;
     }
 
     // ==================== 辅助方法 ====================
@@ -410,36 +374,35 @@ public class ReActAsyncExecutor {
     /**
      * 从大模型回复中解析步骤跟踪实体
      */
-    private StepTrace parseStepTrace(AssistantMessage assistantMessage, List<Message> messages, ToolDomain toolDomain) {
+    private ReActOutput parseStepTrace(AssistantMessage assistantMessage, List<Message> messages, ToolCallback toolCallback) {
         List<AssistantMessage.ToolCall> toolCalls;
         if (CollUtil.isNotEmpty(toolCalls = assistantMessage.getToolCalls())) {
             AssistantMessage.ToolCall mainTool = toolCalls.get(0);
-            // 验证工具调用是否为预期的域工具（虚拟主工具）
-            if (!isDomainTool(mainTool.name(), toolDomain)) {
-                throw new RuntimeException("工具域找不到，调用工具失败。期望工具: " + toolDomain.name() + ", 实际工具: " + mainTool.name());
+            if (!hasReActToolCall(mainTool.name(), toolCallback)) {
+                throw new RuntimeException("ReAct工具域找不到，步调跟踪信息解析失败。期望工具: " + toolCallback.getToolDefinition().name() + ", 实际工具: " + mainTool.name());
             }
-            return JSON.parseObject(mainTool.arguments(), StepTrace.class);
+            return JSON.parseObject(mainTool.arguments(), ReActOutput.class);
         } else {
             String stepTraceJson = JsonFinder.findFirst(assistantMessage.getText());
             if (StrUtil.isEmpty(stepTraceJson)) {
-                return StepTrace.noAction(assistantMessage, messages);
+                return ReActOutput.noAction(assistantMessage, messages);
             }
-            return JSON.parseObject(stepTraceJson, StepTrace.class);
+            return JSON.parseObject(stepTraceJson, ReActOutput.class);
         }
     }
 
     /**
-     * 判断工具是否为域工具（虚拟主工具）
+     * 判断是否调用了ReAct工具域
      *
-     * @param toolName   工具名称
-     * @param toolDomain 域工具
+     * @param toolName     工具名称
+     * @param toolCallback 域工具
      * @return 如果是域工具则返回 true
      */
-    private boolean isDomainTool(String toolName, ToolDomain toolDomain) {
-        if (toolName == null || toolDomain == null) {
+    private boolean hasReActToolCall(String toolName, ToolCallback toolCallback) {
+        if (toolName == null || toolCallback == null) {
             return false;
         }
-        return toolDomain.name().equalsIgnoreCase(toolName);
+        return toolCallback.getToolDefinition().name().equalsIgnoreCase(toolName);
     }
 
     /**
@@ -465,7 +428,7 @@ public class ReActAsyncExecutor {
      */
     public record ObserveResult(
             String taskContent,
-            StepTrace.Status currentState
+            ReActOutput.StepTrace stepTrace
     ) {
     }
 

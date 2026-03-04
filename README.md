@@ -1,5 +1,5 @@
 <p align="center">
-	<img alt="logo" src="./zt-server/src/main/resources/static/logo.png" width="180px" height="180px">
+	<img alt="logo" src="./static/logo.png" width="180px" height="180px">
 </p>
 <h1 align="center" style="margin: 30px 0 30px; font-weight: bold;">智瞳AI · 后端</h1>
 <h4 align="center">一个基于 Spring AI 和 ReAct 模式构建，具有“思考-行动-观察”能力的智能代理后端服务。</h4>

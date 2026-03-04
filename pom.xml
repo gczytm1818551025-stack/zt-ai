@@ -226,17 +226,17 @@
             </dependency>
             <dependency>
                 <groupId>org.dialectics</groupId>
+                <artifactId>zt-skills</artifactId>
+                <version>${zt-ai.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.dialectics</groupId>
                 <artifactId>zt-agent</artifactId>
                 <version>${zt-ai.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.dialectics</groupId>
                 <artifactId>zt-server</artifactId>
-                <version>${zt-ai.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.dialectics</groupId>
-                <artifactId>zt-skills</artifactId>
                 <version>${zt-ai.version}</version>
             </dependency>
 

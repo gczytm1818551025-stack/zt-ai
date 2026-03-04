@@ -1,12 +1,9 @@
 package org.dialectics.ai.agent.domain.vo;
 
 import lombok.*;
-import org.dialectics.ai.agent.domain.pojo.StepTrace;
 import org.dialectics.ai.common.domain.EventVo;
 import org.dialectics.ai.common.enums.EventTypeEnum;
 import org.dialectics.ai.common.enums.ReActStageEnum;
-
-import java.util.Map;
 
 @Data
 @Builder
