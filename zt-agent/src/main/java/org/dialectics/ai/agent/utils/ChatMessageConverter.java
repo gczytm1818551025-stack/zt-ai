@@ -66,18 +66,10 @@ public class ChatMessageConverter {
         MessageType messageType = MessageType.valueOf(msg.getMessageType());
 
         return switch (messageType) {
-            case SYSTEM -> new SystemMessage(msg.getTextContent());
+            case SYSTEM -> SystemMessage.builder().text(msg.getTextContent()).build();
             case USER -> UserMessage.builder().text(msg.getTextContent()).metadata(msg.getMetadata()).media(msg.getMedia()).build();
-            case ASSISTANT -> new ZAssistantMessage(
-                    msg.getTextContent(),
-                    msg.getMetadata(),
-                    msg.getToolCalls(),
-                    msg.getMedia(),
-                    msg.getParams(),
-                    msg.getSteps(),
-                    msg.getStepCount()
-            );
-            case TOOL -> new ToolResponseMessage(msg.getToolResponses(), msg.getMetadata());
+            case ASSISTANT -> new ZAssistantMessage(msg.getTextContent(), msg.getMetadata(), msg.getToolCalls(), msg.getMedia(), msg.getParams(), msg.getSteps(), msg.getStepCount());
+            case TOOL -> ToolResponseMessage.builder().responses(msg.getToolResponses()).metadata(msg.getMetadata()).build();
         };
 
     }

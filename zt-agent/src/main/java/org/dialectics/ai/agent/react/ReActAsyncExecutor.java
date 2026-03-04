@@ -61,7 +61,7 @@ import static org.dialectics.ai.agent.utils.ReActControlVisitor.*;
 @Slf4j
 @Component
 public class ReActAsyncExecutor {
-    @Resource(name = "dashscopeChatModel")
+    @Resource(name = "dashScopeChatModel")
     private ChatModel mainModel;
     @Resource(name = "openAiChatModel")
     private ChatModel planModel;
@@ -345,7 +345,7 @@ public class ReActAsyncExecutor {
                                 throw new UnsupportedOperationException(toolDomain.name() + " is a virtual tool, please call action domain in this virtual tool");
                             }
                         })
-                        .toolChoice(OpenAiApi.ChatCompletionRequest.ToolChoiceBuilder.FUNCTION(toolDomain.name()))
+                        .toolChoice(OpenAiApi.ChatCompletionRequest.ToolChoiceBuilder.function(toolDomain.name()))
                         .internalToolExecutionEnabled(false)
                         .build())
                 .build());

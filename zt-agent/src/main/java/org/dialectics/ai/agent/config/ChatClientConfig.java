@@ -30,7 +30,7 @@ public class ChatClientConfig {
      */
     @Bean
     public ChatClient dashScopeChatClient(
-            @Qualifier("dashscopeChatModel") ChatModel chatModel,
+            @Qualifier("dashScopeChatModel") ChatModel chatModel,
             Advisor loggerAdvisor,
             List<ToolCallbackProvider> providers
     ) {
