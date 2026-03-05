@@ -9,6 +9,7 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.ai.tool.metadata.ToolMetadata;
 import org.springframework.ai.util.json.schema.JsonSchemaGenerator;
 
 import java.util.HashMap;
@@ -18,7 +19,8 @@ import java.util.function.Function;
 
 public class ReActOutputTool {
     /// toolName : tool的调用句柄【tool参数Map : tool返回值字符串】
-    private final Map<String, Function<Map<String, Object>, String>> toolFunctionMap = new HashMap<>();
+    @Getter
+    private final MetaData metaData;
     @Getter
     private final String inputSchema;
 
@@ -39,6 +41,7 @@ public class ReActOutputTool {
         String actionItemsPath = "properties.action.items.properties";
         JSONObject actionItemsEntry = rawJson.getByPath(actionItemsPath, JSONObject.class);
 
+        Map<String, Function<Map<String, Object>, String>> toolFunctionMap = new HashMap<>();
         for (ToolCallback tool : outerTools) {
             ToolDefinition def = tool.getToolDefinition();
             // 填充inputSchema
@@ -49,16 +52,18 @@ public class ReActOutputTool {
         // 写回完整的toolSchema定义
         rawJson.putByPath(actionItemsPath, actionItemsEntry);
         this.inputSchema = rawJson.toString();
+        this.metaData = MetaData.builder().actionMap(toolFunctionMap).build();
     }
 
     @Tool(name = "reActOutputTool", description = "ReAct任务工具")
     public Result apply(
-            @ToolParam(description = "截止目前任务的进度跟踪信息") ReActOutput.StepTrace stepTrace,
-            @ToolParam(description = "当前想要调用的工具列表") List<Map<String, Map<String, Object>>> action
+            @ToolParam(description = "截止目前任务的进度跟踪信息，包括对上一子任务的结果评估、任务进度的记忆、导致当前决策的思考") ReActOutput.StepTrace stepTrace,
+            @ToolParam(description = "当前决定调用的动作") List<Map<String, Map<String, Object>>> action
     ) {
         if (CollUtil.isEmpty(action)) {
-            return new Result("no action was chose! thought: " + stepTrace.getThinking(), false);
+            return new Result("no action was chose! thought: " + stepTrace.getThinking(), true);
         }
+        Map<String, Function<Map<String, Object>, String>> toolFunctionMap = metaData.getActionMap();
         boolean success = true;
         StringBuilder trBuilder = new StringBuilder();
         for (Map<String, Map<String, Object>> a : action) {
@@ -70,15 +75,19 @@ public class ReActOutputTool {
                 trBuilder.append(actionName).append("action failed! result: ").append(e.getMessage()).append("\n");
                 success = false;
             }
+            break; // 一次仅调用一个工具
         }
 
         return new Result(trBuilder.toString(), success);
     }
 
-    public Map<String, Function<Map<String, Object>, String>> getActions() {
-        return toolFunctionMap;
+    public record Result(String resultContent, Boolean success) {
     }
 
-    public record Result(String resultContent, Boolean success) {
+    @Data
+    @Builder
+    @AllArgsConstructor
+    public static class MetaData implements ToolMetadata {
+        private Map<String, Function<Map<String, Object>, String>> actionMap;
     }
 }

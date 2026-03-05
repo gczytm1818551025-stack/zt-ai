@@ -13,7 +13,6 @@ import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.enums.ChatSessionParamEnum;
 import org.dialectics.ai.common.enums.GenerateTypeEnum;
 import org.dialectics.ai.common.enums.ReActParamEnum;
-import org.dialectics.ai.skills.Skills;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
@@ -66,8 +65,6 @@ public class ReActTaskAgent implements Agent {
     private ZChatMemoryRepository chatMemoryRepository;
     @Autowired(required = false)
     protected List<ToolCallbackProvider> toolCallbackProviders;
-    @Autowired
-    private Skills skills;
 
     @Override
     public ChatModel chatModel() {
@@ -149,9 +146,9 @@ public class ReActTaskAgent implements Agent {
                         // 显式指定增强后的inputSchema，不使用默认
                         .inputSchema(reActOutputTool.getInputSchema())
                         .build())
+                .toolMetadata(reActOutputTool.getMetaData())
                 .build();
         ctx.set(TOOL_CALLBACK, tool);
-        ctx.set(ACTIONS, reActOutputTool.getActions());
         log.debug("工具域加载完成: toolDomainName={}", tool.getToolDefinition().name());
     }
 

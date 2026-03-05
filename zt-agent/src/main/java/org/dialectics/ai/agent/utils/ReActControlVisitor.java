@@ -43,10 +43,6 @@ public class ReActControlVisitor {
         return context.get(TOOL_CALLBACK);
     }
 
-    public static Map<String, Function<Map<String, Object>, String>> actions(AgentExecutionContext context) {
-        return context.get(ACTIONS);
-    }
-
     public static AtomicBoolean completed(AgentExecutionContext context) {
         return context.get(COMPLETED);
     }

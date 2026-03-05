@@ -32,7 +32,6 @@ public class McpConfig {
     private McpClientTransport amapMcpTransport(Environment environment) {
         return HttpClientSseClientTransport.builder("https://mcp.amap.com")
                 .sseEndpoint("/sse?key=" + environment.getProperty("AMAP_KEY"))
-//                .sseEndpoint("/sse?key=79ec069a496264ef1c51ad46c2e65e80")
                 .jsonMapper(new JacksonMcpJsonMapper(new ObjectMapper()))
                 .build();
     }

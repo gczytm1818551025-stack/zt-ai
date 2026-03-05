@@ -101,8 +101,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // 3. 生成Token
         Map<String, Object> claims = new HashMap<>();
         claims.put(JwtClaimsConstant.USER_ID, user.getId());
-        // 将小时转换为毫秒
-        long ttlMillis = jwtProperties.getTtl() * 60 * 1000;
+        long ttlMillis = jwtProperties.getTtl() * 60 * 60 * 1000L;
         String token = JwtUtils.createToken(jwtProperties.getSecretKey(), claims, ttlMillis);
 
         // 4. 返回VO

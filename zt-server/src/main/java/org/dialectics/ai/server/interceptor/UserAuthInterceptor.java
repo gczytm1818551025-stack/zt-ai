@@ -1,11 +1,13 @@
 package org.dialectics.ai.server.interceptor;
 
 import cn.hutool.core.util.StrUtil;
+import com.alibaba.fastjson.JSON;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.common.constants.JwtClaimsConstant;
+import org.dialectics.ai.common.domain.R;
 import org.dialectics.ai.common.threadlocal.UserContext;
 import org.dialectics.ai.common.utils.JwtUtils;
 import org.dialectics.ai.server.config.properties.JwtProperties;
@@ -14,6 +16,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 @Component
 @Slf4j
@@ -30,7 +35,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
         String token = request.getHeader(jwtProperties.getTokenHeader());
         Long userId = verifyTokenAndGet(token);
         if (userId == null) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED); // 响应401(无权限)
+            writeUnauthorizedResponse(response, "登录已过期，请重新登录");
             return false;
         }
 
@@ -44,9 +49,13 @@ public class UserAuthInterceptor implements HandlerInterceptor {
         UserContext.remove();
     }
 
-    /**
-     * 校验并返回有效userId
-     */
+    private void writeUnauthorizedResponse(HttpServletResponse response, String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setContentType("application/json;charset=UTF-8");
+        R<Void> result = R.fail(401, message);
+        response.getWriter().write(JSON.toJSONString(result));
+    }
+
     private Long verifyTokenAndGet(String token) {
         try {
             if (StrUtil.isNotEmpty(token)) {
@@ -58,6 +67,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
             Long userId = Long.valueOf(String.valueOf(claims.get(JwtClaimsConstant.USER_ID)));
             return userId;
         } catch (Exception e) {
+            log.warn("Token verification failed: {}", e.getMessage());
             return null;
         }
     }

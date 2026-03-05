@@ -157,14 +157,12 @@ public class ReActAsyncExecutor {
         taskChain(ctx).add(nextNode);
         log.info("[{}] 成功规划子任务: {}", conversationId, nextNode);
 
-        messages.remove(messages.size() - 1);
-
         // 清晰描述当前规划好的子任务
         List<String> subResultChain = subResultChain(ctx);
-        String latestResult = subResultChain.isEmpty()
-                ? "第一个子任务尚未执行"
+        String latestResult = subResultChain.isEmpty() ? "第一个子任务尚未执行"
                 : subResultChain.get(subResultChain.size() - 1);
 
+        messages.remove(messages.size() - 1);
         messages.add(UserMessage.builder().text(PromptManager.renderFrom(
                 PromptNameConstant.TASK_DESC,
                 Map.of(
@@ -254,8 +252,8 @@ public class ReActAsyncExecutor {
     /**
      * act同步流程
      */
-    private ActResult doAct(ChatResponse thinkResponse, List<Message> messages, AgentExecutionContext context) {
-        ToolCallback toolCallback = toolCallback(context);
+    private ActResult doAct(ChatResponse thinkResponse, List<Message> messages, AgentExecutionContext ctx) {
+        ToolCallback toolCallback = toolCallback(ctx);
         AssistantMessage assistantMessage = thinkResponse.getResult().getOutput();
         List<AssistantMessage.ToolCall> toolCalls = assistantMessage.getToolCalls();
         StringBuilder trBuilder = new StringBuilder();
@@ -271,7 +269,7 @@ public class ReActAsyncExecutor {
                 success = toolResult.success();
                 trBuilder.append(toolResult.resultContent());
             } else {
-                Map<String, Function<Map<String, Object>, String>> actions = actions(context);
+                var actions = ((ReActOutputTool)toolCallback(ctx)).getMetaData().getActionMap();
                 success = callSkillTool(actions, trBuilder, toolCalls);
             }
         } else {
@@ -297,7 +295,7 @@ public class ReActAsyncExecutor {
         }
 
         // 总结动作结果
-        List<TaskNode> taskChain = taskChain(context);
+        List<TaskNode> taskChain = taskChain(ctx);
         TaskNode node = taskChain.get(taskChain.size() - 1);
         String callResult = trBuilder.toString();
 
@@ -306,7 +304,7 @@ public class ReActAsyncExecutor {
         String actionSummary = RenderUtil.render("根据思路【{{thinking}}】的行动结果如下: {{result}}",
                 Map.of("thinking", node.getThinking(), "result", callResult));
 
-        subResultChain(context).add(actionSummary);
+        subResultChain(ctx).add(actionSummary);
 
         return new ActResult(success, callResult);
     }

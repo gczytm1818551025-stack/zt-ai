@@ -11,8 +11,6 @@ public enum ReActParamEnum {
     SUB_RESULT_CHAIN,
     /// ReAct工具回调对象
     TOOL_CALLBACK,
-    /// 工具回调的函数句柄列表
-    ACTIONS,
     COMPLETED,
     FINAL_RESULT,
     TOKEN_COUNTER,

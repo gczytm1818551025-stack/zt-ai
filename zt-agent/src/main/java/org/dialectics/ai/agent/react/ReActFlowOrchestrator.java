@@ -11,6 +11,7 @@ import org.dialectics.ai.agent.manager.PromptManager;
 import org.dialectics.ai.agent.manager.ReActStreamManager;
 import org.dialectics.ai.agent.memory.ZChatMemory;
 import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
+import org.dialectics.ai.common.base.StreamManager;
 import org.dialectics.ai.common.constants.RedisConstant;
 import org.dialectics.ai.common.exception.ReActFlowException;
 import org.dialectics.ai.common.constants.PromptNameConstant;
@@ -42,7 +43,6 @@ import static org.dialectics.ai.agent.utils.ReActControlVisitor.*;
 import static org.dialectics.ai.agent.utils.ChatSessionVisitor.*;
 
 import org.dialectics.ai.agent.service.SessionService;
-import org.dialectics.ai.agent.service.EventHistoryService;
 
 /**
  * ReAct 流程编排器
@@ -60,34 +60,15 @@ import org.dialectics.ai.agent.service.EventHistoryService;
  * - 每个会话支持多订阅和重连
  * - Redis 存储会话状态，支持刷新后恢复
  * - 通过 connectionCount 判断是否启动过流程
+ * <p>
+ * 并发控制：
+ * - 使用 Reactor 背压机制和调度器配置控制并发
+ * - llmScheduler 和 toolScheduler 配置线程池大小
+ * - StreamManager 的 Sinks.Many 配置背压缓冲区
  */
 @Slf4j
 @Component
 public class ReActFlowOrchestrator {
-
-    /**
-     * 资源守卫——确保并发许可在任何情况下都能释放
-     */
-    static class ReActResourceGuard implements AutoCloseable {
-        private final ReActConcurrencyLimiter limiter;
-        private final AtomicBoolean released = new AtomicBoolean(false);
-
-        public ReActResourceGuard(ReActConcurrencyLimiter limiter) {
-            this.limiter = limiter;
-        }
-
-        public boolean acquired() {
-            return !released.get();
-        }
-
-        @Override
-        public void close() {
-            if (released.compareAndSet(false, true)) {
-                limiter.release();
-            }
-        }
-    }
-
     @Autowired
     private ReActAsyncExecutor asyncExecutor;
     @Autowired
@@ -96,8 +77,6 @@ public class ReActFlowOrchestrator {
     private ZChatMemoryRepository chatMemoryRepository;
     @Autowired
     private SessionService sessionService;
-    @Resource(name = "reActConcurrencyLimiter")
-    private ReActConcurrencyLimiter concurrencyLimiter;
     @Autowired
     private ReActPerformanceMetrics metrics;
     @Resource(name = "orchestrationScheduler")
@@ -108,8 +87,6 @@ public class ReActFlowOrchestrator {
     private ReActStreamManager streamManager;
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
-    @Autowired
-    private EventHistoryService eventHistoryService;
 
     /**
      * 编排执行ReAct流程(入口)
@@ -127,52 +104,7 @@ public class ReActFlowOrchestrator {
 
         // 获取数据源Flux
         Flux<ReActEventVo> dataSource = streamManager.getStream(sessionId);
-        if (dataSource == null) {
-            log.error("[{}] Flux 为空: sessionId={}", requestId, sessionId);
-            return Flux.error(new IllegalStateException("会话 Flux 创建失败"));
-        }
-
-        // TODO 重连模式：发送恢复提示和历史回放
-        if (streamManager.isActive(sessionId)) {
-            log.info("[{}] 会话流程已进行中，返回重连 Flux: sessionId={}", requestId, sessionId);
-            return dataSource.doOnSubscribe(s -> {
-                log.debug("[{}] 重连Flux已订阅", requestId);
-                // 从 Redis Stream 获取历史事件以计算进度信息
-                String reconnectMessage = "正在继续之前的对话...";
-                try {
-                    List<ReActEventVo> historyEvents = eventHistoryService.getHistory(sessionId, 0);
-                    int historySize = historyEvents.size();
-
-                    // 计算已完成步数（统计ACTION_RESULT类型的事件）
-                    long completedSteps = historyEvents.stream()
-                            .filter(e -> e.getStage() == ReActStageEnum.ACTION_RESULT)
-                            .count();
-
-                    // 检查是否有最终结果
-                    boolean hasFinalResult = historyEvents.stream()
-                            .anyMatch(e -> e.getStage() == ReActStageEnum.FINAL_SUMMARY);
-
-                    // 构建详细的恢复提示消息
-                    if (hasFinalResult) {
-                        reconnectMessage = String.format("任务已完成。已完成 %d 步，共回放 %d 条历史消息。",
-                                completedSteps, historySize);
-                    } else {
-                        reconnectMessage = String.format("正在继续之前的对话... 已完成 %d 步，共回放 %d 条历史消息。",
-                                completedSteps, historySize);
-                    }
-
-                    log.debug("[{}] 重连信息: {}", requestId, reconnectMessage);
-                } catch (Exception e) {
-                    log.warn("[{}] 获取历史事件失败，使用默认重连消息: {}", requestId, e.getMessage());
-                }
-
-                // 发送重连提示消息
-                streamManager.tryEmit(sessionId, ReActEventVo.newDataEvent(reconnectMessage, null));
-            });
-        }
-
-        // ---------- 首次请求 ----------
-        log.info("[{}] 首次请求，启动ReAct流程: sessionId={}", requestId, sessionId);
+        log.info("[{}] 启动ReAct流程: sessionId={}", requestId, sessionId);
         // 设置活跃状态标志
         String reactStatusKey = RedisConstant.REACT_STATUS_KEY_PREFIX + sessionId;
         RedisRetryUtils.safeSet(redisTemplate, reactStatusKey, "active", Duration.ofHours(1));
@@ -194,37 +126,24 @@ public class ReActFlowOrchestrator {
         Duration requestTimeout = Duration.ofSeconds(properties.getRequestTimeoutSeconds());
         AtomicBoolean timerStopped = new AtomicBoolean(false);
 
-        // 启动异步编排——使用Mono.using确保并发许可安全释放
-        Mono.using(() -> {
-                            // 资源获取：尝试获取并发许可
-                            if (!concurrencyLimiter.tryAcquire(properties.getRequestTimeoutSeconds())) {
-                                log.warn("[{}] 并发限制：已拒绝请求", requestId);
-                                // 清除会话活跃状态
-                                RedisRetryUtils.safeDelete(redisTemplate, reactStatusKey);
-                                throw new ReActFlowException.BusyException("系统繁忙，请稍后重试");
-                            }
-                            return new ReActResourceGuard(concurrencyLimiter);
-                        },
-                        guard -> reActLoop(ctx, maxStep, requestTimeout)
-                                .then() // 将 Flux<Void> 转换为 Mono<Void>
-                                .doOnSuccess(v -> {
-                                    handleSuccess(ctx, totalTimer);
-                                    timerStopped.set(true);
-                                })
-                                .doOnError(error -> {
-                                    handleError(error, ctx, totalTimer);
-                                    timerStopped.set(true);
-                                }),
-                        ReActResourceGuard::close
-                ).doFinally(signal -> {
-                    // 注意：STOP 事件已在 handleSuccess 中发送，这里不再重复发送
+        // 启动异步编排——直接订阅 Flux，使用 Reactor 背压和调度器控制并发
+        reActLoop(ctx, maxStep, requestTimeout)
+                .doOnComplete(() -> {
+                    handleSuccess(ctx, totalTimer);
+                    timerStopped.set(true);
+                })
+                .doOnError(error -> {
+                    handleError(error, ctx, totalTimer);
+                    timerStopped.set(true);
+                })
+                .doFinally(signal -> {
                     // 确保在失败情况下也发送 STOP 事件
                     if (!"onComplete".equals(signal.name())) {
-                        streamManager.tryEmit(sessionId, ReActEventVo.stopEvent());
+                        streamManager.emit(sessionId, ReActEventVo.stopEvent());
                         log.debug("[{}] 停止事件已发送: signal={}", requestId, signal);
                     }
 
-                    // 停止计时器并记录指标（如果还未停止）
+                    // 停止计时器并记录指标
                     if (timerStopped.compareAndSet(false, true)) {
                         try {
                             metrics.recordTotalDuration(totalTimer);
@@ -237,7 +156,6 @@ public class ReActFlowOrchestrator {
                     streamManager.markFlowCompleted(sessionId);
                     // 清除会话活跃状态
                     RedisRetryUtils.safeDelete(redisTemplate, reactStatusKey);
-
                     metrics.recordComplete();
                     log.debug("[{}] 流程完成，释放资源: signal={}", requestId, signal);
                 })
@@ -247,6 +165,19 @@ public class ReActFlowOrchestrator {
         // 返回Flux
         return dataSource.doOnCancel(() -> {
             log.info("[{}] 客户端取消订阅", requestId(ctx));
+            // 刷新对话标题
+            flushChatTitle(ctx);
+
+            // 客户端取消时，如果 ReAct 流程仍在进行，主动清理资源
+            if (RedisRetryUtils.safeHasKey(redisTemplate, reactStatusKey)) {
+                log.info("[{}] 客户端取消，主动清理 ReAct 会话资源: sessionId={}", requestId(ctx), sessionId(ctx));
+                // 清除 Redis 状态
+                RedisRetryUtils.safeDelete(redisTemplate, reactStatusKey);
+                // 释放 Sink 并发送 STOP 事件
+                streamManager.release(sessionId(ctx));
+                streamManager.tryEmit(sessionId(ctx), ReActEventVo.stopEvent());
+                log.info("[{}] ReAct 会话资源已清理: sessionId={}", requestId(ctx), sessionId(ctx));
+            }
         });
     }
 
@@ -408,16 +339,16 @@ public class ReActFlowOrchestrator {
             finalResult = "任务已中断";
         }
 
-        // 先发送最终结果事件（FINAL_SUMMARY）
+        // 发送最终结果事件
         ReActEventVo finalResultEvent = ReActEventVo.newDataEvent(new ReActEventVo.FinalData((String) finalResult), ReActStageEnum.FINAL_SUMMARY);
         emitEvent(finalResultEvent, ctx);
         log.info("[{}] FINAL_SUMMARY 事件已发送: finalResult={}", requestId(ctx), finalResult);
 
-        // 再发送停止事件（确保 FINAL_SUMMARY 先到达前端）
-        streamManager.tryEmit(sessionId(ctx), ReActEventVo.stopEvent());
+        // 发送停止事件
+        streamManager.emit(sessionId(ctx), ReActEventVo.stopEvent());
         log.info("[{}] STOP 事件已发送", requestId(ctx));
 
-        // 追加最终结果到对话记忆
+        // 追加最终结果记忆
         final Object ffResult = finalResult;
         chatMemory.add(conversationId(ctx), chatMemoryRepository, repository -> {
             ZAssistantMessage lastMsg = (ZAssistantMessage) chatMemoryRepository.findLastByConversationId(conversationId(ctx));
@@ -447,11 +378,7 @@ public class ReActFlowOrchestrator {
         metrics.recordSteps(stepCount(ctx).get());
 
         // 刷新对话标题
-        String sessionId = sessionId(ctx);
-        Long userId = userId(ctx);
-        String question = targetTask(ctx);
-        String response = finalResult(ctx);
-        sessionService.flushChat(sessionId, userId, question, response);
+        flushChatTitle(ctx);
     }
 
     /**
@@ -463,6 +390,13 @@ public class ReActFlowOrchestrator {
 
         // 在错误情况下追加提示信息
         String errorMsg = "任务已终止"/* + error.getMessage()*/;
+
+        // 发送最终结果事件
+        ReActEventVo finalResultEvent = ReActEventVo.newDataEvent(new ReActEventVo.FinalData(errorMsg), ReActStageEnum.FINAL_SUMMARY);
+        emitEvent(finalResultEvent, ctx);
+        log.info("[{}] FINAL_SUMMARY 事件已发送: finalResult={}", requestId(ctx), errorMsg);
+
+        // 追加最终结果记忆
         chatMemory.add(conversationId(ctx), chatMemoryRepository, repository -> {
             ZAssistantMessage lastMsg = (ZAssistantMessage) chatMemoryRepository.findLastByConversationId(conversationId(ctx));
             // 追加错误信息到 content
@@ -480,14 +414,25 @@ public class ReActFlowOrchestrator {
             return updatedMsg;
         });
         log.debug("[{}] 追加错误信息", requestId(ctx));
+
+        // 刷新对话标题
+        flushChatTitle(ctx);
     }
 
     // ==================== 辅助方法 ====================
 
     /**
+     * 刷新对话标题
+     */
+    private void flushChatTitle(AgentExecutionContext ctx) {
+        sessionService.flushChat(sessionId(ctx), userId(ctx), question(ctx), targetTask(ctx));
+    }
+
+    /**
      * 发送事件
+     *
      * @param event 事件对象
-     * @param ctx 执行上下文
+     * @param ctx   执行上下文
      */
     private void emitEvent(ReActEventVo event, AgentExecutionContext ctx) {
         try {

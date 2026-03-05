@@ -126,8 +126,7 @@
                 <version>${commons-pool2.version}</version>
             </dependency>
 
-            <!-- Playwright 浏览器自动化工具 -->
-            <!-- 终端执行目录授权 sudo chown -R $(whoami) /Users/$(whoami)/Library/Caches/ms-playwright -->
+            <!-- Playwright浏览器自动化工具 -->
             <dependency>
                 <groupId>com.microsoft.playwright</groupId>
                 <artifactId>playwright</artifactId>

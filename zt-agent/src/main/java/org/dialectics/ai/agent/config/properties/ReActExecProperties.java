@@ -7,6 +7,11 @@ import lombok.NoArgsConstructor;
 
 /**
  * ReAct 执行器配置属性
+ * <p>
+ * 并发控制说明：
+ * - 使用 Reactor 背压机制和调度器配置控制并发
+ * - llmScheduler 和 toolScheduler 已配置线程池大小
+ * - StreamManager 的 Sinks.Many 已配置背压缓冲区
  */
 @Data
 @Builder
@@ -15,7 +20,6 @@ import lombok.NoArgsConstructor;
 public class ReActExecProperties {
     private int llmTimeoutSeconds;
     private int toolTimeoutSeconds;
-    private int maxConcurrent;
     private int requestTimeoutSeconds;
     private int backpressureBufferSize;
     private String backpressureStrategy;

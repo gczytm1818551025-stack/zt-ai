@@ -3,9 +3,7 @@ package org.dialectics.ai.agent.manager;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
-import org.dialectics.ai.agent.service.EventHistoryService;
 import org.dialectics.ai.common.base.StreamManager;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -47,9 +45,6 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
      * Key: sessionId, Value: SessionState
      */
     private static final Map<String, SessionState> SESSION_STATE_MAP = new ConcurrentHashMap<>();
-
-    @Autowired
-    private EventHistoryService eventHistoryService;
 
     /**
      * 背压缓冲区大小
@@ -247,9 +242,6 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
                         state.lastEventId.incrementAndGet();
                         state.lastEmittedSequence.set(seq);
 
-                        // 记录事件到历史（异步）
-                        eventHistoryService.recordEvent(sessionId, event);
-
                         log.debug("[{}] 事件已发送: seq={}, type={}, stage={}, cost={}ms",
                                 sessionId, seq, event.getType(), event.getStage(),
                                 System.currentTimeMillis() - startTime);
@@ -319,13 +311,6 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
         if (!state.releasing.compareAndSet(false, true)) {
             log.debug("[{}] 已在释放中，跳过", sessionId);
             return;
-        }
-
-        // 清理事件历史
-        try {
-            eventHistoryService.clearHistory(sessionId);
-        } catch (Exception e) {
-            log.warn("[{}] 清理事件历史失败: {}", sessionId, e.getMessage());
         }
 
         // 释放Sink

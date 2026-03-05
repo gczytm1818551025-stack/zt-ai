@@ -3,7 +3,6 @@ package org.dialectics.ai.agent.config;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
-import org.dialectics.ai.agent.react.ReActConcurrencyLimiter;
 import org.dialectics.ai.agent.react.ReActPerformanceMetrics;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -19,6 +18,13 @@ import reactor.core.scheduler.Schedulers;
  * 2. 资源隔离：避免不同类型任务互相影响
  * 3. 可观测性：集成 Micrometer 指标
  * 4. 线程安全：Spring AI 官方 ChatModel 已线程安全，使用并发调度器
+ * <p>
+ * 并发控制说明：
+ * - 使用 Reactor 背压机制和调度器配置控制并发，无需手动 Semaphore 控制
+ * - llmScheduler 的 maxPoolSize 控制 LLM 调用并发数
+ * - toolScheduler 的 maxPoolSize 控制工具执行并发数
+ * - StreamManager 的 Sinks.Many 背压缓冲区控制事件积压
+ * - Reactor 的背压机制天然处理流量控制
  */
 @Slf4j
 @Configuration
@@ -52,10 +58,8 @@ public class ReActExecutorConfig {
     @Value("${zt-ai.react.tool.timeout-seconds:30}")
     private int toolTimeoutSeconds;
 
-    // ==================== 并发控制配置 ====================
+    // ==================== 超时配置 ====================
 
-    @Value("${zt-ai.react.max-concurrent:50}")
-    private int maxConcurrent;
     @Value("${zt-ai.react.request-timeout-seconds:300}")
     private int requestTimeoutSeconds;
 
@@ -129,19 +133,6 @@ public class ReActExecutorConfig {
     }
 
     /**
-     * 并发控制信号量
-     * <p>
-     * 用于限制同时处理的 ReAct 请求数量
-     *
-     * @return 并发限制器
-     */
-    @Bean("reActConcurrencyLimiter")
-    public ReActConcurrencyLimiter concurrencyLimiter(MeterRegistry meterRegistry) {
-        log.info("初始化并发限制器: maxConcurrent={}", maxConcurrent);
-        return new ReActConcurrencyLimiter(maxConcurrent, meterRegistry);
-    }
-
-    /**
      * ReAct 性能指标收集器
      *
      * @return 性能指标收集器
@@ -156,6 +147,11 @@ public class ReActExecutorConfig {
      * ReAct 配置属性Bean
      * <p>
      * 提供配置参数的集中管理
+     * <p>
+     * 并发控制说明：
+     * - 使用 Reactor 背压机制和调度器配置控制并发
+     * - llmScheduler 和 toolScheduler 已配置线程池大小
+     * - StreamManager 的 Sinks.Many 已配置背压缓冲区
      *
      * @return ReAct 配置属性
      */
@@ -164,7 +160,6 @@ public class ReActExecutorConfig {
         return ReActExecProperties.builder()
                 .llmTimeoutSeconds(llmTimeoutSeconds)
                 .toolTimeoutSeconds(toolTimeoutSeconds)
-                .maxConcurrent(maxConcurrent)
                 .requestTimeoutSeconds(requestTimeoutSeconds)
                 .backpressureBufferSize(backpressureBufferSize)
                 .backpressureStrategy(backpressureStrategy)
