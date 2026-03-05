@@ -10,7 +10,6 @@ import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
 import org.dialectics.ai.agent.domain.pojo.ReActOutput;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
-import org.dialectics.ai.agent.tools.ReActOutputTool;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.exception.ReActExecutionException;
 import org.dialectics.ai.agent.manager.PromptManager;
@@ -148,7 +147,7 @@ public class ReActAsyncExecutor {
         String resultJson = toolCallback.call(JSON.toJSONString(reActOutput));
 
         // 解析大模型的子任务规划意图
-        ReActOutputTool.Result planResult = JSON.parseObject(resultJson, ReActOutputTool.Result.class);
+        ReActOutputToolCallback.Result planResult = JSON.parseObject(resultJson, ReActOutputToolCallback.Result.class);
         if (!planResult.success()) {
             throw new ReActExecutionException("子任务规划失败");
         }
@@ -265,18 +264,18 @@ public class ReActAsyncExecutor {
 
             if (hasReActToolCall(toolName, toolCallback)) {
                 ReActOutput reActOutput = parseStepTrace(thinkResponse.getResult().getOutput(), messages, toolCallback);
-                ReActOutputTool.Result toolResult = callReActTool(reActOutput, toolCallback);
+                ReActOutputToolCallback.Result toolResult = callReActTool(reActOutput, toolCallback);
                 success = toolResult.success();
                 trBuilder.append(toolResult.resultContent());
             } else {
-                var actions = ((ReActOutputTool)toolCallback(ctx)).getMetaData().getActionMap();
+                var actions = ((ReActOutputToolCallback.MetaData) toolCallback(ctx).getToolMetadata()).getActionMap();
                 success = callSkillTool(actions, trBuilder, toolCalls);
             }
         } else {
             String stepTraceJson = JsonFinder.findFirst(assistantMessage.getText());
             if (StrUtil.isNotEmpty(stepTraceJson)) {
                 ReActOutput reActOutput = JSON.parseObject(stepTraceJson, ReActOutput.class);
-                ReActOutputTool.Result toolResult = callReActTool(reActOutput, toolCallback);
+                ReActOutputToolCallback.Result toolResult = callReActTool(reActOutput, toolCallback);
                 success = toolResult.success();
                 trBuilder.append(toolResult.resultContent());
             } else {
@@ -356,11 +355,11 @@ public class ReActAsyncExecutor {
     /**
      * 调用虚拟主工具，拼接调用结果
      */
-    private ReActOutputTool.Result callReActTool(ReActOutput reActOutput, ToolCallback toolCallback) {
+    private ReActOutputToolCallback.Result callReActTool(ReActOutput reActOutput, ToolCallback toolCallback) {
         Timer.Sample timer = metrics.startToolCallTimer();
         try {
             String resultJson = toolCallback.call(JSON.toJSONString(reActOutput));
-            ReActOutputTool.Result toolResult = JSON.parseObject(resultJson, ReActOutputTool.Result.class);
+            ReActOutputToolCallback.Result toolResult = JSON.parseObject(resultJson, ReActOutputToolCallback.Result.class);
             return toolResult;
         } finally {
             metrics.recordToolCallDuration(timer);

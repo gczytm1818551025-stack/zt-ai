@@ -1,36 +1,40 @@
-package org.dialectics.ai.agent.tools;
+package org.dialectics.ai.agent.react;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import lombok.*;
 import org.dialectics.ai.agent.domain.pojo.ReActOutput;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.metadata.ToolMetadata;
+import org.springframework.ai.tool.method.MethodToolCallback;
+import org.springframework.ai.tool.support.ToolDefinitions;
 import org.springframework.ai.util.json.schema.JsonSchemaGenerator;
+import org.springframework.util.Assert;
+import org.springframework.util.ReflectionUtils;
 
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
-public class ReActOutputTool {
-    /// toolName : tool的调用句柄【tool参数Map : tool返回值字符串】
-    @Getter
-    private final MetaData metaData;
-    @Getter
-    private final String inputSchema;
+/**
+ * <h4>ReAct标准输出工具回调对象
+ * <p>装饰器模式
+ */
+public class ReActOutputToolCallback implements ToolCallback {
+    // final保证多线程下的可见性
+    private final ToolCallback toolCallback;
 
-    public ReActOutputTool(List<ToolCallback> outerTools) {
-        String inputSchema;
-        try {
-            inputSchema = JsonSchemaGenerator.generateForMethodInput(this.getClass().getMethod("apply", ReActOutput.StepTrace.class, List.class));
-        } catch (NoSuchMethodException e) {
-            throw new RuntimeException("method apply is not exist, inputSchema of " + this.getClass().getName() + " is failed generated");
-        }
+    public ReActOutputToolCallback(List<ToolCallback> outerTools) {
+        Method toolMethod = ReflectionUtils.findMethod(ReActOutputToolCallback.class, "apply", ReActOutput.StepTrace.class, List.class);
+        Assert.notNull(toolMethod, "No tool method found for ReActOutputTool");
+        String inputSchema = JsonSchemaGenerator.generateForMethodInput(toolMethod);
         JSONObject rawJson = JSONUtil.parseObj(inputSchema);
         // 手动构造被泛型参数缺失抹去的JSON节点
         JSONObject itemsNode = JSONUtil.createObj()
@@ -41,6 +45,7 @@ public class ReActOutputTool {
         String actionItemsPath = "properties.action.items.properties";
         JSONObject actionItemsEntry = rawJson.getByPath(actionItemsPath, JSONObject.class);
 
+        // toolName : tool的调用句柄【tool参数Map : tool返回值字符串】
         Map<String, Function<Map<String, Object>, String>> toolFunctionMap = new HashMap<>();
         for (ToolCallback tool : outerTools) {
             ToolDefinition def = tool.getToolDefinition();
@@ -51,8 +56,16 @@ public class ReActOutputTool {
         }
         // 写回完整的toolSchema定义
         rawJson.putByPath(actionItemsPath, actionItemsEntry);
-        this.inputSchema = rawJson.toString();
-        this.metaData = MetaData.builder().actionMap(toolFunctionMap).build();
+
+        this.toolCallback = MethodToolCallback.builder()
+                .toolObject(this)
+                .toolMethod(toolMethod)
+                .toolDefinition(ToolDefinitions.builder(toolMethod)
+                        // 显式指定增强后的inputSchema，不使用默认
+                        .inputSchema(rawJson.toString())
+                        .build())
+                .toolMetadata(MetaData.builder().actionMap(toolFunctionMap).build())
+                .build();
     }
 
     @Tool(name = "reActOutputTool", description = "ReAct任务工具")
@@ -63,7 +76,7 @@ public class ReActOutputTool {
         if (CollUtil.isEmpty(action)) {
             return new Result("no action was chose! thought: " + stepTrace.getThinking(), true);
         }
-        Map<String, Function<Map<String, Object>, String>> toolFunctionMap = metaData.getActionMap();
+        Map<String, Function<Map<String, Object>, String>> toolFunctionMap = ((MetaData) this.toolCallback.getToolMetadata()).getActionMap();
         boolean success = true;
         StringBuilder trBuilder = new StringBuilder();
         for (Map<String, Map<String, Object>> a : action) {
@@ -79,6 +92,18 @@ public class ReActOutputTool {
         }
 
         return new Result(trBuilder.toString(), success);
+    }
+
+    @NotNull
+    @Override
+    public ToolDefinition getToolDefinition() {
+        return toolCallback.getToolDefinition();
+    }
+
+    @NotNull
+    @Override
+    public String call(@NotNull String toolInput) {
+        return toolCallback.call(toolInput);
     }
 
     public record Result(String resultContent, Boolean success) {

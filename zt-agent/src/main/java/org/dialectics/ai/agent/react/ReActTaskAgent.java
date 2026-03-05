@@ -3,12 +3,10 @@ package org.dialectics.ai.agent.react;
 import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.Agent;
 import org.dialectics.ai.agent.AgentExecutionContext;
-import org.dialectics.ai.agent.domain.pojo.ReActOutput;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
 import org.dialectics.ai.agent.memory.ZChatMemory;
 import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
-import org.dialectics.ai.agent.tools.ReActOutputTool;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.enums.ChatSessionParamEnum;
 import org.dialectics.ai.common.enums.GenerateTypeEnum;
@@ -21,14 +19,10 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
-import org.springframework.ai.tool.method.MethodToolCallback;
-import org.springframework.ai.tool.support.ToolDefinitions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.util.ReflectionUtils;
 import reactor.core.publisher.Flux;
 
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -137,19 +131,9 @@ public class ReActTaskAgent implements Agent {
      * 初始化工具链容器
      */
     private void loadReActTools(AgentExecutionContext ctx) {
-        ReActOutputTool reActOutputTool = new ReActOutputTool(toolCallbacks(ctx));
-        Method toolMethod = ReflectionUtils.findMethod(ReActOutputTool.class, "apply", ReActOutput.StepTrace.class, List.class);
-        ToolCallback tool = MethodToolCallback.builder()
-                .toolObject(reActOutputTool)
-                .toolMethod(toolMethod)
-                .toolDefinition(ToolDefinitions.builder(toolMethod)
-                        // 显式指定增强后的inputSchema，不使用默认
-                        .inputSchema(reActOutputTool.getInputSchema())
-                        .build())
-                .toolMetadata(reActOutputTool.getMetaData())
-                .build();
-        ctx.set(TOOL_CALLBACK, tool);
-        log.debug("工具域加载完成: toolDomainName={}", tool.getToolDefinition().name());
+        ToolCallback reActOutputTool = new ReActOutputToolCallback(toolCallbacks(ctx));
+        ctx.set(TOOL_CALLBACK, reActOutputTool);
+        log.debug("工具域加载完成: toolDomainName={}", reActOutputTool.getToolDefinition().name());
     }
 
     /**
