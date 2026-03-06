@@ -16,7 +16,7 @@ import org.dialectics.ai.agent.manager.PromptManager;
 import org.dialectics.ai.common.constants.PromptNameConstant;
 import org.dialectics.ai.common.utils.JsonFinder;
 import org.dialectics.ai.common.utils.RenderUtil;
-import org.dialectics.ai.skills.Skills;
+import org.dialectics.ai.agent.skills.SkillsHook;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -60,7 +60,7 @@ public class ReActAsyncExecutor {
     @Resource(name = "dashScopeChatModel")
     private ChatModel mainModel; // 暂时仅使用同一个模型
     @Autowired
-    private Skills skills;
+    private SkillsHook skillsHook;
 
     @Resource(name = "reActExecutorProperties")
     private ReActExecProperties properties;
@@ -121,7 +121,7 @@ public class ReActAsyncExecutor {
                 Map.of(
                         "targetTask", targetTask(ctx),
                         "latestTaskHistory", taskResultHistory,
-                        "skillsMetadata", skills.metadata(),
+                        "skillsMetadata", skillsHook.listSkills(),
                         "currentStep", stepCount(ctx).get(),
                         "maxStep", properties.getMaxStep()
                 )
@@ -168,7 +168,7 @@ public class ReActAsyncExecutor {
                         "index", taskChain(ctx).size(),
                         "taskNode", JSON.toJSONString(nextNode),
                         "latestResult", latestResult,
-                        "skill", skills.get(nextNode.getSkillName())
+                        "skill", skillsHook.getSkillContent(nextNode.getSkillName())
                 )
         )).build());
 

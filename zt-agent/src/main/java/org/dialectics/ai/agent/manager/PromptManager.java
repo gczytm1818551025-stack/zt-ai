@@ -26,7 +26,7 @@ public class PromptManager {
         Resource[] promptResources = loader.getResources("classpath:prompt/**/*.st");
         for (Resource resource : promptResources) {
             PROMPT_MAP.put(resource.getFilename(), IoUtil.readUtf8(resource.getInputStream()));
-            log.info("提示词【{}】加载成功！", resource.getFilename());
+            log.info("基础提示词【{}】加载成功！", resource.getFilename());
         }
     }
 

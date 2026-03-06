@@ -13,9 +13,10 @@
     <artifactId>zt-agent</artifactId>
 
     <dependencies>
+        <!-- zt-common -->
         <dependency>
             <groupId>org.dialectics</groupId>
-            <artifactId>zt-skills</artifactId>
+            <artifactId>zt-common</artifactId>
         </dependency>
 
         <!--redis-->

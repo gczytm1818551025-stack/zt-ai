@@ -28,7 +28,7 @@ import java.util.function.Function;
  * <p>装饰器模式
  */
 public class ReActOutputToolCallback implements ToolCallback {
-    // final保证多线程下的可见性
+
     private final ToolCallback toolCallback;
 
     public ReActOutputToolCallback(List<ToolCallback> outerTools) {
@@ -57,6 +57,7 @@ public class ReActOutputToolCallback implements ToolCallback {
         // 写回完整的toolSchema定义
         rawJson.putByPath(actionItemsPath, actionItemsEntry);
 
+        // final+无toolCallback引用逃逸 保证this的多线程可见性
         this.toolCallback = MethodToolCallback.builder()
                 .toolObject(this)
                 .toolMethod(toolMethod)

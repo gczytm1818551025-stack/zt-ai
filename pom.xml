@@ -13,7 +13,6 @@
         <module>zt-common</module>
         <module>zt-server</module>
         <module>zt-agent</module>
-        <module>zt-skills</module>
     </modules>
 
     <properties>
@@ -221,11 +220,6 @@
             <dependency>
                 <groupId>org.dialectics</groupId>
                 <artifactId>zt-common</artifactId>
-                <version>${zt-ai.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.dialectics</groupId>
-                <artifactId>zt-skills</artifactId>
                 <version>${zt-ai.version}</version>
             </dependency>
             <dependency>
