@@ -260,7 +260,7 @@ public class ReActFlowOrchestrator {
                                 ReActEventVo.ThinkData thinkData;
                                 String stepTraceJson = JsonFinder.findFirst(thinkingText);
                                 if (StrUtil.isEmpty(stepTraceJson)) {
-                                    thinkData = new ReActEventVo.ThinkData(StrUtil.isEmpty(thinkingText) ? "暂无详细思考" : thinkingText);
+                                    thinkData = new ReActEventVo.ThinkData(StrUtil.isEmpty(thinkingText) ? planData.thinking() : thinkingText);
                                 } else {
                                     ReActOutput reActOutput = JSON.parseObject(stepTraceJson, ReActOutput.class);
                                     thinkData = new ReActEventVo.ThinkData(reActOutput.getStepTrace().getThinking());

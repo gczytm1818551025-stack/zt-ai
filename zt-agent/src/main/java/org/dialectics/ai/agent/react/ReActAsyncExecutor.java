@@ -10,6 +10,7 @@ import org.dialectics.ai.agent.AgentExecutionContext;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
 import org.dialectics.ai.agent.domain.pojo.ReActOutput;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
+import org.dialectics.ai.agent.tools.ReActOutputTool;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.exception.ReActExecutionException;
 import org.dialectics.ai.agent.manager.PromptManager;
@@ -33,7 +34,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Function;
 
 import io.micrometer.core.instrument.Timer;
 
@@ -108,7 +108,7 @@ public class ReActAsyncExecutor {
     private ObserveResult doObserve(List<Message> messages, AgentExecutionContext ctx) {
         String conversationId = ChatSessionVisitor.conversationId(ctx);
         // 刷新历史任务记忆，重装系统提示并装配新的任务
-        flushMessagesForNewTaskNode(messages, ctx);
+        flushContextForNewTaskNode(messages, ctx);
 
         // 总结历史任务链
         String taskResultHistory = subResultChain(ctx).stream()
@@ -147,7 +147,7 @@ public class ReActAsyncExecutor {
         String resultJson = toolCallback.call(JSON.toJSONString(reActOutput));
 
         // 解析大模型的子任务规划意图
-        ReActOutputToolCallback.Result planResult = JSON.parseObject(resultJson, ReActOutputToolCallback.Result.class);
+        ReActOutputTool.Result planResult = JSON.parseObject(resultJson, ReActOutputTool.Result.class);
         if (!planResult.success()) {
             throw new ReActExecutionException("子任务规划失败");
         }
@@ -252,46 +252,15 @@ public class ReActAsyncExecutor {
      * act同步流程
      */
     private ActResult doAct(ChatResponse thinkResponse, List<Message> messages, AgentExecutionContext ctx) {
-        ToolCallback toolCallback = toolCallback(ctx);
         AssistantMessage assistantMessage = thinkResponse.getResult().getOutput();
-        List<AssistantMessage.ToolCall> toolCalls = assistantMessage.getToolCalls();
+        ToolCallback reActTool = toolCallback(ctx);
         StringBuilder trBuilder = new StringBuilder();
 
         boolean success;
-        if (CollUtil.isNotEmpty(toolCalls)) {
-            AssistantMessage.ToolCall tool = toolCalls.get(0);
-            String toolName = tool.name();
-
-            if (hasReActToolCall(toolName, toolCallback)) {
-                ReActOutput reActOutput = parseStepTrace(thinkResponse.getResult().getOutput(), messages, toolCallback);
-                ReActOutputToolCallback.Result toolResult = callReActTool(reActOutput, toolCallback);
-                success = toolResult.success();
-                trBuilder.append(toolResult.resultContent());
-            } else {
-                var actions = ((ReActOutputToolCallback.MetaData) toolCallback(ctx).getToolMetadata()).getActionMap();
-                success = callSkillTool(actions, trBuilder, toolCalls);
-            }
-        } else {
-            String stepTraceJson = JsonFinder.findFirst(assistantMessage.getText());
-            if (StrUtil.isNotEmpty(stepTraceJson)) {
-                ReActOutput reActOutput = JSON.parseObject(stepTraceJson, ReActOutput.class);
-                ReActOutputToolCallback.Result toolResult = callReActTool(reActOutput, toolCallback);
-                success = toolResult.success();
-                trBuilder.append(toolResult.resultContent());
-            } else {
-                // 根据LLM返回的文本内容判断是否真的失败
-                String assistantText = assistantMessage.getText();
-                if (StrUtil.isNotBlank(assistantText)) {
-                    // 有文本内容，可能是正常的思考或回复，不标记为失败
-                    trBuilder.append("无动作执行，返回内容为: ").append(assistantText).append("\n");
-                    success = true;
-                } else {
-                    // 文本内容为空，才标记为失败
-                    trBuilder.append("无动作执行，且无有效回复内容\n");
-                    success = false;
-                }
-            }
-        }
+        ReActOutput reActOutput = parseStepTrace(assistantMessage, messages, reActTool);
+        ReActOutputTool.Result toolResult = callReActTool(reActOutput, reActTool);
+        success = toolResult.success();
+        trBuilder.append(toolResult.resultContent());
 
         // 总结动作结果
         List<TaskNode> taskChain = taskChain(ctx);
@@ -308,7 +277,7 @@ public class ReActAsyncExecutor {
         return new ActResult(success, callResult);
     }
 
-    // ==================== 大模型和工具调用方法 ====================
+    // ============= 辅助方法 =============
 
     /**
      * 执行 LLM 调用（同步方法）
@@ -328,58 +297,31 @@ public class ReActAsyncExecutor {
     }
 
     /**
-     * 调用特定技能工具链，拼接调用结果
-     */
-    private boolean callSkillTool(Map<String, Function<Map<String, Object>, String>> actions, StringBuilder trBuilder, List<AssistantMessage.ToolCall> tools) {
-        boolean success = true;
-        Timer.Sample timer = metrics.startToolCallTimer();
-        try {
-            for (AssistantMessage.ToolCall tool : tools) {
-                String toolName = tool.name();
-                String arguments = tool.arguments();
-                try {
-                    String result = actions.get(toolName).apply(JSON.parseObject(arguments));
-                    trBuilder.append(toolName).append("动作执行成功，结果为：").append(result).append("\n");
-                } catch (Exception e) {
-                    trBuilder.append(toolName).append("动作执行出错，报错为：").append(e.getMessage()).append("\n");
-                    log.error("调用的技能工具 {} 执行出错：{}", toolName, e.getStackTrace());
-                    success = false;
-                }
-            }
-        } finally {
-            metrics.recordToolCallDuration(timer);
-        }
-        return success;
-    }
-
-    /**
      * 调用虚拟主工具，拼接调用结果
      */
-    private ReActOutputToolCallback.Result callReActTool(ReActOutput reActOutput, ToolCallback toolCallback) {
+    private ReActOutputTool.Result callReActTool(ReActOutput reActOutput, ToolCallback toolCallback) {
         Timer.Sample timer = metrics.startToolCallTimer();
         try {
             String resultJson = toolCallback.call(JSON.toJSONString(reActOutput));
-            ReActOutputToolCallback.Result toolResult = JSON.parseObject(resultJson, ReActOutputToolCallback.Result.class);
+            ReActOutputTool.Result toolResult = JSON.parseObject(resultJson, ReActOutputTool.Result.class);
             return toolResult;
         } finally {
             metrics.recordToolCallDuration(timer);
         }
     }
 
-    // ==================== 辅助方法 ====================
-
     /**
      * 从大模型回复中解析步骤跟踪实体
      */
     private ReActOutput parseStepTrace(AssistantMessage assistantMessage, List<Message> messages, ToolCallback toolCallback) {
-        List<AssistantMessage.ToolCall> toolCalls;
-        if (CollUtil.isNotEmpty(toolCalls = assistantMessage.getToolCalls())) {
-            AssistantMessage.ToolCall mainTool = toolCalls.get(0);
-            if (!hasReActToolCall(mainTool.name(), toolCallback)) {
-                throw new RuntimeException("ReAct工具域找不到，步调跟踪信息解析失败。期望工具: " + toolCallback.getToolDefinition().name() + ", 实际工具: " + mainTool.name());
-            }
+        List<AssistantMessage.ToolCall> toolCalls= assistantMessage.getToolCalls();
+        AssistantMessage.ToolCall mainTool;
+        // 如果大模型决定调用工具并且正确调用了ReAct工具域，直接解析参数
+        if (CollUtil.isNotEmpty(toolCalls) && hasReActToolCall((mainTool = toolCalls.get(0)).name(), toolCallback)) {
             return JSON.parseObject(mainTool.arguments(), ReActOutput.class);
-        } else {
+        }
+        // 否则到回复文本中找可解析的ReActOutput的JSON
+        else {
             String stepTraceJson = JsonFinder.findFirst(assistantMessage.getText());
             if (StrUtil.isEmpty(stepTraceJson)) {
                 return ReActOutput.noAction(assistantMessage, messages);
@@ -392,27 +334,20 @@ public class ReActAsyncExecutor {
      * 判断是否调用了ReAct工具域
      *
      * @param toolName     工具名称
-     * @param toolCallback 域工具
+     * @param reActToolCallback 域工具
      * @return 如果是域工具则返回 true
      */
-    private boolean hasReActToolCall(String toolName, ToolCallback toolCallback) {
-        if (toolName == null || toolCallback == null) {
+    private boolean hasReActToolCall(String toolName, ToolCallback reActToolCallback) {
+        if (StrUtil.isEmpty(toolName) || reActToolCallback == null) {
             return false;
         }
-        return toolCallback.getToolDefinition().name().equalsIgnoreCase(toolName);
+        return reActToolCallback.getToolDefinition().name().equalsIgnoreCase(toolName);
     }
 
     /**
-     * 刷新记忆消息列表，为新子任务节点准备
-     * <p>
-     * 优化方案：保留历史消息，根据需要限制长度以控制上下文窗口大小
-     * <p>
-     * 消息保留策略：
-     * 1. 系统消息：始终保留并更新
-     * 2. 原始用户问题：始终保留（在系统消息之后）
-     * 3. 历史对话消息：根据配置保留最近 N 条
+     * 刷新记忆上下文，重新添加系统提示词
      */
-    private void flushMessagesForNewTaskNode(List<Message> messages, AgentExecutionContext context) {
+    private void flushContextForNewTaskNode(List<Message> messages, AgentExecutionContext context) {
         messages.clear();
         // 重新添加系统消息（包含最新的任务信息和技能元数据）
         messages.add(SystemMessage.builder().text(PromptManager.renderFrom(PromptNameConstant.REACT_SYSTEM)).build());

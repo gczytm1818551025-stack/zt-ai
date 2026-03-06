@@ -7,6 +7,7 @@ import org.dialectics.ai.agent.domain.pojo.TaskNode;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
 import org.dialectics.ai.agent.memory.ZChatMemory;
 import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
+import org.dialectics.ai.agent.tools.ReActOutputTool;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.enums.ChatSessionParamEnum;
 import org.dialectics.ai.common.enums.GenerateTypeEnum;
@@ -131,9 +132,9 @@ public class ReActTaskAgent implements Agent {
      * 初始化工具链容器
      */
     private void loadReActTools(AgentExecutionContext ctx) {
-        ToolCallback reActOutputTool = new ReActOutputToolCallback(toolCallbacks(ctx));
-        ctx.set(TOOL_CALLBACK, reActOutputTool);
-        log.debug("工具域加载完成: toolDomainName={}", reActOutputTool.getToolDefinition().name());
+        ToolCallback reActOutputToolCallback = ReActOutputTool.createReActOutputToolCallback(toolCallbacks(ctx));
+        ctx.set(TOOL_CALLBACK, reActOutputToolCallback);
+        log.debug("工具域加载完成: toolDomainName={}", reActOutputToolCallback.getToolDefinition().name());
     }
 
     /**
