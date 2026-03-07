@@ -18,22 +18,21 @@ import java.util.Map;
 @Component
 @Slf4j
 public class FileStorageTools {
-    @Value("${zt-ai.file.base:/tmp/}")
+    @Value("${zt-ai.file.base:~/Desktop}")
     private String baseFolder;
     @Value("${zt-ai.file.domain:http://localhost:18081}")
     private String domain;
 
     @Tool(name = "saveFile", description = "存储文件并返回文件uuid")
-    public String saveFile(@ToolParam(description = "内容字符串") String content) {
+    public String saveFile(@ToolParam(description = "文件内容的输入字符串") String content) {
         var uuid = IdUtil.fastSimpleUUID();
         FileUtil.writeBytes(content.getBytes(StandardCharsets.UTF_8), getFilePath(uuid));
         return uuid;
     }
 
     @Tool(name = "generateDownloadUrl", description = "根据文件uuid生成可下载url")
-    public String generateDownloadUrl(@ToolParam(description = "文件名") String name,
-                                      @ToolParam(description = "文件uuid") String uuid) {
-        return StrUtil.format("{}{}?name={}", domain, StrUtil.format("/public/content/download/{uuid}", Map.of("uuid", uuid)), name);
+    public String generateDownloadUrl(@ToolParam(description = "文件uuid") String uuid) {
+        return StrUtil.format("{}{}?name={}", domain, StrUtil.format("/public/content/download/{uuid}", Map.of("uuid", uuid)), "resultdoc.html");
     }
 
     @Tool(name = "generateOpenUrl", description = "根据文件uuid生成可打开url")
@@ -58,7 +57,7 @@ public class FileStorageTools {
     }
 
     private String getFilePath(String uuid) {
-        return baseFolder + uuid;
+        return baseFolder + "/" + uuid;
     }
 
     /**

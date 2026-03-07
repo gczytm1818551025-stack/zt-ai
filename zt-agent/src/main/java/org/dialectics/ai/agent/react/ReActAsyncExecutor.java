@@ -135,23 +135,21 @@ public class ReActAsyncExecutor {
         ToolCallback toolCallback = toolCallback(ctx);
         ChatResponse chatResponse = doCallLLM(mainModel, messages, toolCallback);
 
-        // 统计 token
-        if (chatResponse.getMetadata().getUsage() != null) {
-            long tokens = chatResponse.getMetadata().getUsage().getTotalTokens();
-            tokenCounter(ctx).add(tokens);
-            metrics.recordTokenConsumption(tokens);
-            log.info("[{}] 任务规划后消耗总token数：{}", conversationId, tokenCounter(ctx).sum());
-        }
+        // 统计token
+        long tokens = chatResponse.getMetadata().getUsage().getTotalTokens();
+        tokenCounter(ctx).add(tokens);
+        metrics.recordTokenConsumption(tokens);
+        log.info("[{}] 任务规划后消耗总token数：{}", conversationId, tokenCounter(ctx).sum());
 
         ReActOutput reActOutput = parseStepTrace(chatResponse.getResult().getOutput(), messages, toolCallback);
         String resultJson = toolCallback.call(JSON.toJSONString(reActOutput));
 
         // 解析大模型的子任务规划意图
-        ReActOutputTool.Result planResult = JSON.parseObject(resultJson, ReActOutputTool.Result.class);
-        if (!planResult.success()) {
+        ReActOutputTool.ToolOutput planToolOutput = JSON.parseObject(resultJson, ReActOutputTool.ToolOutput.class);
+        if (!planToolOutput.success()) {
             throw new ReActExecutionException("子任务规划失败");
         }
-        TaskNode nextNode = JSON.parseObject(JsonFinder.findFirst(planResult.resultContent()), TaskNode.class);
+        TaskNode nextNode = JSON.parseObject(JsonFinder.findFirst(planToolOutput.resultContent()), TaskNode.class);
         nextNode.setThinking(reActOutput.getStepTrace().getThinking());
         taskChain(ctx).add(nextNode);
         log.info("[{}] 成功规划子任务: {}", conversationId, nextNode);
@@ -193,13 +191,11 @@ public class ReActAsyncExecutor {
                     try {
                         ChatResponse chatResponse = doCallLLM(mainModel, messages, toolCallback);
 
-                        // 统计 token
-                        if (chatResponse.getMetadata().getUsage() != null) {
-                            long tokens = chatResponse.getMetadata().getUsage().getTotalTokens();
-                            tokenCounter(context).add(tokens);
-                            metrics.recordTokenConsumption(tokens);
-                            log.info("[{}] 思考后消耗总token数：{}", conversationId, tokenCounter(context).sum());
-                        }
+                        // 统计token
+                        long tokens = chatResponse.getMetadata().getUsage().getTotalTokens();
+                        tokenCounter(context).add(tokens);
+                        metrics.recordTokenConsumption(tokens);
+                        log.info("[{}] 思考后消耗总token数：{}", conversationId, tokenCounter(context).sum());
 
                         return new ThinkResult(chatResponse);
                     } finally {
@@ -258,9 +254,14 @@ public class ReActAsyncExecutor {
 
         boolean success;
         ReActOutput reActOutput = parseStepTrace(assistantMessage, messages, reActTool);
-        ReActOutputTool.Result toolResult = callReActTool(reActOutput, reActTool);
-        success = toolResult.success();
-        trBuilder.append(toolResult.resultContent());
+        ReActOutputTool.ToolOutput toolOutput = callReActTool(reActOutput, reActTool);
+        success = toolOutput.success();
+        // 如果模型意图出错，手动切除循环规划
+        String toolResult = StrUtil.equals(ReActOutputTool.NON_TOOL, toolOutput.toolName())
+                || StrUtil.equals("generateNext", toolOutput.toolName())
+                ? assistantMessage.getText()
+                : toolOutput.resultContent();
+        trBuilder.append(toolResult);
 
         // 总结动作结果
         List<TaskNode> taskChain = taskChain(ctx);
@@ -299,12 +300,12 @@ public class ReActAsyncExecutor {
     /**
      * 调用虚拟主工具，拼接调用结果
      */
-    private ReActOutputTool.Result callReActTool(ReActOutput reActOutput, ToolCallback toolCallback) {
+    private ReActOutputTool.ToolOutput callReActTool(ReActOutput reActOutput, ToolCallback toolCallback) {
         Timer.Sample timer = metrics.startToolCallTimer();
         try {
             String resultJson = toolCallback.call(JSON.toJSONString(reActOutput));
-            ReActOutputTool.Result toolResult = JSON.parseObject(resultJson, ReActOutputTool.Result.class);
-            return toolResult;
+            ReActOutputTool.ToolOutput toolToolOutput = JSON.parseObject(resultJson, ReActOutputTool.ToolOutput.class);
+            return toolToolOutput;
         } finally {
             metrics.recordToolCallDuration(timer);
         }
@@ -314,7 +315,7 @@ public class ReActAsyncExecutor {
      * 从大模型回复中解析步骤跟踪实体
      */
     private ReActOutput parseStepTrace(AssistantMessage assistantMessage, List<Message> messages, ToolCallback toolCallback) {
-        List<AssistantMessage.ToolCall> toolCalls= assistantMessage.getToolCalls();
+        List<AssistantMessage.ToolCall> toolCalls = assistantMessage.getToolCalls();
         AssistantMessage.ToolCall mainTool;
         // 如果大模型决定调用工具并且正确调用了ReAct工具域，直接解析参数
         if (CollUtil.isNotEmpty(toolCalls) && hasReActToolCall((mainTool = toolCalls.get(0)).name(), toolCallback)) {
@@ -333,7 +334,7 @@ public class ReActAsyncExecutor {
     /**
      * 判断是否调用了ReAct工具域
      *
-     * @param toolName     工具名称
+     * @param toolName          工具名称
      * @param reActToolCallback 域工具
      * @return 如果是域工具则返回 true
      */

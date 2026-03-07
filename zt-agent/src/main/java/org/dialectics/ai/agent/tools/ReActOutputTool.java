@@ -70,32 +70,34 @@ public class ReActOutputTool {
     }
 
     @Tool(name = "reActOutputTool", description = "ReAct任务工具")
-    public Result apply(
+    public ToolOutput apply(
             @ToolParam(description = "截止目前任务的进度跟踪信息，包括对上一子任务的结果评估、任务进度的记忆、导致当前决策的思考") ReActOutput.StepTrace stepTrace,
             @ToolParam(description = "当前决定调用的动作") List<Map<String, Map<String, Object>>> action
     ) {
         if (CollUtil.isEmpty(action)) {
-            return new Result("no action was chose! thought: " + stepTrace.getThinking(), true);
+            return new ToolOutput(NON_TOOL, "no action was chose! thought: " + stepTrace.getThinking(), true);
         }
         Map<String, Function<Map<String, Object>, String>> toolFunctionMap = this.toolFunctionMap;
         boolean success = true;
         StringBuilder trBuilder = new StringBuilder();
+        String toolName = NON_TOOL;
         for (Map<String, Map<String, Object>> a : action) {
-            String actionName = a.keySet().stream().findFirst().orElseThrow();
+            toolName = a.keySet().stream().findFirst().orElseThrow();
             try {
-                String result = toolFunctionMap.get(actionName).apply(a.get(actionName));
-                trBuilder.append(actionName).append("action success! result: ").append(result).append("\n");
+                String result = toolFunctionMap.get(toolName).apply(a.get(toolName));
+                trBuilder.append(toolName).append("action success! result: ").append(result).append("\n");
             } catch (Exception e) {
-                trBuilder.append(actionName).append("action failed! result: ").append(e.getMessage()).append("\n");
+                trBuilder.append(toolName).append("action failed! result: ").append(e.getMessage()).append("\n");
                 success = false;
             }
             break; // 暂且一次仅调用一个工具
         }
 
-        return new Result(trBuilder.toString(), success);
+        return new ToolOutput(toolName, trBuilder.toString(), success);
     }
 
-    public record Result(String resultContent, Boolean success) {
+    public record ToolOutput(String toolName, String resultContent, Boolean success) {
     }
 
+    public static final String NON_TOOL = "unknown";
 }

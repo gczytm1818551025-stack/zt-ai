@@ -134,7 +134,6 @@ public class ReActTaskAgent implements Agent {
     private void loadReActTools(AgentExecutionContext ctx) {
         ToolCallback reActOutputToolCallback = ReActOutputTool.createReActOutputToolCallback(toolCallbacks(ctx));
         ctx.set(TOOL_CALLBACK, reActOutputToolCallback);
-        log.debug("工具域加载完成: toolDomainName={}", reActOutputToolCallback.getToolDefinition().name());
     }
 
     /**
@@ -147,8 +146,8 @@ public class ReActTaskAgent implements Agent {
      */
     private List<ToolCallback> toolCallbacks(AgentExecutionContext ctx) {
         List<ToolCallback> toolCallbacks = new ArrayList<>(Arrays.asList(ToolCallbacks.from(
-                new DoneTools(ctx),
-                new PlanTools()
+                new DoneTool(ctx),
+                new PlanTool()
         )));
         for (ToolCallbackProvider provider : toolCallbackProviders) {
             toolCallbacks.addAll(Arrays.asList(provider.getToolCallbacks()));
@@ -159,7 +158,7 @@ public class ReActTaskAgent implements Agent {
     /**
      * Plan工具
      */
-    protected record PlanTools() {
+    protected record PlanTool() {
         @Tool(name = "generateNext", description = "规划下一个子任务节点")
         public TaskNode generateNext(
                 @ToolParam(description = "skill名称") String skillName,
@@ -172,10 +171,10 @@ public class ReActTaskAgent implements Agent {
     /**
      * Done工具
      */
-    protected record DoneTools(AgentExecutionContext context) {
+    protected record DoneTool(AgentExecutionContext context) {
         @Tool(name = "done", description = "任务完成")
         public String done(
-                @ToolParam(description = "任务完成情况的最终总结") String text,
+                @ToolParam(description = "任务完成情况的最终总结或困境说明") String text,
                 @ToolParam(description = "任务是否成功") Boolean success
         ) {
             completed(context).set(true);

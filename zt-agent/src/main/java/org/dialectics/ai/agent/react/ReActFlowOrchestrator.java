@@ -191,7 +191,7 @@ public class ReActFlowOrchestrator {
                     // 检查管道是否活跃
                     if (!RedisRetryUtils.safeHasKey(redisTemplate, reactStatusKey)) {
                         log.info("[{}] Redis 状态不存在，任务被停止: sessionId={}", requestId(ctx), sessionId(ctx));
-                        return Mono.error(new ReActFlowException("会话状态不存在"));
+                        return Mono.empty();
                     }
                     // 检查是否已完成（handleSuccess之后）
                     if (completed(ctx).get()) {

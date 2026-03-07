@@ -12,10 +12,12 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.tool.definition.ToolDefinition;
 
+import java.net.SocketException;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -40,17 +42,73 @@ public class McpShotSseUtil {
      * <p>核心方法——实现短连接SSE操作
      */
     public static <T> T retrieveFromShortConnectionClient(Supplier<McpAsyncClient> clientSupplier, Function<McpAsyncClient, T> func) {
-        McpAsyncClient mcpClient = clientSupplier.get();
-        mcpClient.initialize()
-                .doOnError(e -> log.error("error on sse client init", e))
-                .doOnSuccess(v -> log.trace("sse client inited.")).block();
+        McpAsyncClient mcpClient = null;
         try {
+            mcpClient = clientSupplier.get();
+            mcpClient.initialize()
+                    .doOnError(e -> {
+                        if (isConnectionResetError(e)) {
+                            log.debug("SSE client initialization interrupted (connection reset)");
+                        } else {
+                            log.error("error on sse client init", e);
+                        }
+                    })
+                    .doOnSuccess(v -> log.trace("sse client inited."))
+                    .block();
             return func.apply(mcpClient);
+        } catch (Exception e) {
+            if (isConnectionResetError(e)) {
+                log.debug("MCP SSE operation interrupted (connection reset)");
+                return null;
+            }
+            throw e;
         } finally {
-            mcpClient.closeGracefully()
-                    .doOnError(e -> log.error("error on sse client close", e))
-                    .doOnSuccess(v -> log.trace("sse client closed.")).block();
+            if (mcpClient != null) {
+                try {
+                    mcpClient.closeGracefully()
+                            .doOnError(e -> {
+                                if (isConnectionResetError(e)) {
+                                    log.trace("SSE client close interrupted (connection reset) - this is normal during termination");
+                                } else {
+                                    log.error("error on sse client close", e);
+                                }
+                            })
+                            .doOnSuccess(v -> log.trace("sse client closed."))
+                            .block();
+                } catch (Exception e) {
+                    if (!isConnectionResetError(e)) {
+                        log.warn("Error closing MCP client: {}", e.getMessage());
+                    }
+                }
+            }
         }
+    }
+
+    /**
+     * 判断是否为连接重置错误（用户主动终止时正常发生）
+     */
+    private static boolean isConnectionResetError(Throwable e) {
+        if (e == null) {
+            return false;
+        }
+        if (e instanceof SocketException) {
+            return true;
+        }
+        if (e instanceof java.io.IOException) {
+            return true;
+        }
+        if (e instanceof TimeoutException) {
+            return true;
+        }
+        String message = e.getMessage();
+        if (message != null) {
+            String lowerMessage = message.toLowerCase();
+            return lowerMessage.contains("connection reset") ||
+                   lowerMessage.contains("broken pipe") ||
+                   lowerMessage.contains("connection closed") ||
+                   lowerMessage.contains("stream observed an error");
+        }
+        return isConnectionResetError(e.getCause());
     }
 
     private static ToolCallbackProvider mcpSSEToolCallbackProvider(Supplier<McpAsyncClient> clientSupplier) {
@@ -111,7 +169,7 @@ public class McpShotSseUtil {
                 }).block();
             });
             log.info("tool call - [{}]output:{}", tool.name(), res);
-            return res;
+            return res != null ? res : "{}";
         }
 
         @Override
