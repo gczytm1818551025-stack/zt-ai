@@ -6,7 +6,7 @@ import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.alibaba.cloud.ai.dashscope.spec.DashScopeApiSpec;
 import com.alibaba.fastjson2.JSON;
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentContext;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
 import org.dialectics.ai.agent.domain.pojo.ReActOutput;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
@@ -79,7 +79,7 @@ public class ReActAsyncExecutor {
      * @param ctx 执行上下文
      * @return ObserveResult 的 Mono
      */
-    public Mono<ObserveResult> observe(AgentExecutionContext ctx) {
+    public Mono<ObserveResult> observe(AgentContext ctx) {
         String conversationId = ChatSessionVisitor.conversationId(ctx);
         List<Message> messages = messageMemory(ctx);
         return Mono.fromCallable(() -> {
@@ -105,7 +105,7 @@ public class ReActAsyncExecutor {
     /**
      * observe阶段同步流程
      */
-    private ObserveResult doObserve(List<Message> messages, AgentExecutionContext ctx) {
+    private ObserveResult doObserve(List<Message> messages, AgentContext ctx) {
         String conversationId = ChatSessionVisitor.conversationId(ctx);
         // 刷新历史任务记忆，重装系统提示并装配新的任务
         flushContextForNewTaskNode(messages, ctx);
@@ -165,6 +165,7 @@ public class ReActAsyncExecutor {
                 Map.of(
                         "index", taskChain(ctx).size(),
                         "taskNode", JSON.toJSONString(nextNode),
+                        "targetTask", targetTask(ctx),
                         "latestResult", latestResult,
                         "skill", skillsHook.getSkillContent(nextNode.getSkillName())
                 )
@@ -181,7 +182,7 @@ public class ReActAsyncExecutor {
      * @param context 执行上下文
      * @return ThinkResult 的 Mono
      */
-    public Mono<ThinkResult> think(AgentExecutionContext context) {
+    public Mono<ThinkResult> think(AgentContext context) {
         String conversationId = ChatSessionVisitor.conversationId(context);
         ToolCallback toolCallback = toolCallback(context);
         List<Message> messages = messageMemory(context);
@@ -221,7 +222,7 @@ public class ReActAsyncExecutor {
      * @param context       执行上下文
      * @return ActResult 的 Mono
      */
-    public Mono<ActResult> act(ChatResponse thinkResponse, AgentExecutionContext context) {
+    public Mono<ActResult> act(ChatResponse thinkResponse, AgentContext context) {
         String conversationId = ChatSessionVisitor.conversationId(context);
         List<Message> messages = messageMemory(context);
         return Mono.fromCallable(() -> {
@@ -247,7 +248,7 @@ public class ReActAsyncExecutor {
     /**
      * act同步流程
      */
-    private ActResult doAct(ChatResponse thinkResponse, List<Message> messages, AgentExecutionContext ctx) {
+    private ActResult doAct(ChatResponse thinkResponse, List<Message> messages, AgentContext ctx) {
         AssistantMessage assistantMessage = thinkResponse.getResult().getOutput();
         ToolCallback reActTool = toolCallback(ctx);
         StringBuilder trBuilder = new StringBuilder();
@@ -348,7 +349,7 @@ public class ReActAsyncExecutor {
     /**
      * 刷新记忆上下文，重新添加系统提示词
      */
-    private void flushContextForNewTaskNode(List<Message> messages, AgentExecutionContext context) {
+    private void flushContextForNewTaskNode(List<Message> messages, AgentContext context) {
         messages.clear();
         // 重新添加系统消息（包含最新的任务信息和技能元数据）
         messages.add(SystemMessage.builder().text(PromptManager.renderFrom(PromptNameConstant.REACT_SYSTEM)).build());

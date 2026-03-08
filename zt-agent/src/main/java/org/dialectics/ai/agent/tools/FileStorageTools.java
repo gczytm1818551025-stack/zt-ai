@@ -18,13 +18,13 @@ import java.util.Map;
 @Component
 @Slf4j
 public class FileStorageTools {
-    @Value("${zt-ai.file.base:~/Desktop}")
+    @Value("${zt-ai.file.base:~/tmp}")
     private String baseFolder;
     @Value("${zt-ai.file.domain:http://localhost:18081}")
     private String domain;
 
     @Tool(name = "saveFile", description = "存储文件并返回文件uuid")
-    public String saveFile(@ToolParam(description = "文件内容的输入字符串") String content) {
+    public String saveFile(@ToolParam(description = "文件内容的输入utf-8字符串，") String content) {
         var uuid = IdUtil.fastSimpleUUID();
         FileUtil.writeBytes(content.getBytes(StandardCharsets.UTF_8), getFilePath(uuid));
         return uuid;

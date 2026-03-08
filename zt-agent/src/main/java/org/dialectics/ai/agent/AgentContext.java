@@ -10,24 +10,24 @@ import java.util.Map;
  * 线程本地Agent执行上下文
  */
 @Slf4j
-public class AgentExecutionContext {
+public class AgentContext {
     @Getter
-    private final AgentExecutionContext parent;
+    private final AgentContext parent;
     private final Map<Enum<?>, Object> localAttributes = new HashMap<>();
     private final Map<Enum<?>, Object> globalAttributes;
 
-    public AgentExecutionContext() {
+    public AgentContext() {
         this.parent = null;
         this.globalAttributes = new HashMap<>();
     }
 
-    public AgentExecutionContext(AgentExecutionContext parent) {
+    public AgentContext(AgentContext parent) {
         this.parent = parent;
         this.globalAttributes = parent.globalAttributes;
     }
 
-    public AgentExecutionContext createChild() {
-        return new AgentExecutionContext(this);
+    public AgentContext createChild() {
+        return new AgentContext(this);
     }
 
     public void set(Enum<?> key, Object value) {

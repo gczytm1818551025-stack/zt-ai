@@ -2,7 +2,7 @@ package org.dialectics.ai.agent.react;
 
 import cn.hutool.core.util.StrUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentContext;
 import org.dialectics.ai.agent.config.properties.ReActExecProperties;
 import org.dialectics.ai.agent.domain.pojo.ZAssistantMessage;
 import org.dialectics.ai.agent.domain.pojo.ReActOutput;
@@ -11,7 +11,6 @@ import org.dialectics.ai.agent.manager.PromptManager;
 import org.dialectics.ai.agent.manager.ReActStreamManager;
 import org.dialectics.ai.agent.memory.ZChatMemory;
 import org.dialectics.ai.agent.memory.ZChatMemoryRepository;
-import org.dialectics.ai.common.base.StreamManager;
 import org.dialectics.ai.common.constants.RedisConstant;
 import org.dialectics.ai.common.exception.ReActFlowException;
 import org.dialectics.ai.common.constants.PromptNameConstant;
@@ -95,7 +94,7 @@ public class ReActFlowOrchestrator {
      * @param ctx  执行上下文
      * @return ReAct 事件流
      */
-    public Flux<ReActEventVo> orchestrate(String task, AgentExecutionContext ctx) {
+    public Flux<ReActEventVo> orchestrate(String task, AgentContext ctx) {
         String sessionId = sessionId(ctx);
         String conversationId = conversationId(ctx);
         String requestId = requestId(ctx);
@@ -184,14 +183,14 @@ public class ReActFlowOrchestrator {
     /**
      * 编排ReAct循环
      */
-    private Flux<Void> reActLoop(AgentExecutionContext ctx, int maxStep, Duration requestTimeout) {
+    private Flux<Void> reActLoop(AgentContext ctx, int maxStep, Duration requestTimeout) {
         String reactStatusKey = RedisConstant.REACT_STATUS_KEY_PREFIX + sessionId(ctx);
 
         return Mono.defer(() -> {
                     // 检查管道是否活跃
                     if (!RedisRetryUtils.safeHasKey(redisTemplate, reactStatusKey)) {
-                        log.info("[{}] Redis 状态不存在，任务被停止: sessionId={}", requestId(ctx), sessionId(ctx));
-                        return Mono.empty();
+                        log.info("[{}] 会话状态不存在，任务被停止: sessionId={}", requestId(ctx), sessionId(ctx));
+                        return Mono.error(new ReActFlowException("reAct任务已终止，sessionId=" + sessionId(ctx)));
                     }
                     // 检查是否已完成（handleSuccess之后）
                     if (completed(ctx).get()) {
@@ -218,7 +217,7 @@ public class ReActFlowOrchestrator {
     /**
      * 单步执行ReAct (observe → think → act)
      */
-    private Mono<Void> executeOneStep(AgentExecutionContext ctx) {
+    private Mono<Void> executeOneStep(AgentContext ctx) {
         String conversationId = conversationId(ctx);
         // observe
         return asyncExecutor.observe(ctx)
@@ -328,7 +327,7 @@ public class ReActFlowOrchestrator {
     /**
      * 处理成功
      */
-    private void handleSuccess(AgentExecutionContext ctx, Timer.Sample totalTimer) {
+    private void handleSuccess(AgentContext ctx, Timer.Sample totalTimer) {
         // 发送最终结果
         Object finalResult = finalResult(ctx);
 
@@ -384,7 +383,7 @@ public class ReActFlowOrchestrator {
     /**
      * 处理错误
      */
-    private void handleError(Throwable error, AgentExecutionContext ctx, Timer.Sample totalTimer) {
+    private void handleError(Throwable error, AgentContext ctx, Timer.Sample totalTimer) {
         metrics.recordFailure(error.getClass().getSimpleName());
         log.error("[{}] 任务失败: conversationId={}, error={}", requestId(ctx), conversationId(ctx), error.getMessage(), error);
 
@@ -424,7 +423,7 @@ public class ReActFlowOrchestrator {
     /**
      * 刷新对话标题
      */
-    private void flushChatTitle(AgentExecutionContext ctx) {
+    private void flushChatTitle(AgentContext ctx) {
         sessionService.flushChat(sessionId(ctx), userId(ctx), question(ctx), targetTask(ctx));
     }
 
@@ -434,7 +433,7 @@ public class ReActFlowOrchestrator {
      * @param event 事件对象
      * @param ctx   执行上下文
      */
-    private void emitEvent(ReActEventVo event, AgentExecutionContext ctx) {
+    private void emitEvent(ReActEventVo event, AgentContext ctx) {
         try {
             boolean success = streamManager.tryEmit(sessionId(ctx), event);
             if (!success) {

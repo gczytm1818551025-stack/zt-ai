@@ -1,7 +1,7 @@
 package org.dialectics.ai.server.service.impl;
 
 import org.dialectics.ai.agent.chat.ChatAgent;
-import org.dialectics.ai.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentContext;
 import org.dialectics.ai.agent.domain.vo.ChatEventVo;
 import org.dialectics.ai.agent.service.ChatService;
 import org.dialectics.ai.common.enums.ChatSessionParamEnum;
@@ -21,7 +21,7 @@ public class CommonChatServiceImpl implements ChatService {
     @Override
     public Flux<ChatEventVo> chat(String question, String sessionId, GenerateTypeEnum generateType) {
         // 构建对话上下文
-        AgentExecutionContext context = new AgentExecutionContext();
+        AgentContext context = new AgentContext();
         String conversationId = ChatService.getConversationId(sessionId, String.valueOf(UserContext.get()));
         context.set(Map.of(
                 ChatSessionParamEnum.SESSION_ID, sessionId,

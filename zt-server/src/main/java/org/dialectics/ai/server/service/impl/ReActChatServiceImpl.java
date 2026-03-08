@@ -1,7 +1,7 @@
 package org.dialectics.ai.server.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentContext;
 import org.dialectics.ai.agent.react.ReActTaskAgent;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
 import org.dialectics.ai.agent.manager.ReActStreamManager;
@@ -31,7 +31,7 @@ public class ReActChatServiceImpl implements ChatService {
     @Override
     public Flux<ReActEventVo> chat(String question, String sessionId, GenerateTypeEnum generateType) {
         // 构建对话上下文
-        AgentExecutionContext context = new AgentExecutionContext();
+        AgentContext context = new AgentContext();
         String conversationId = ChatService.getConversationId(sessionId, String.valueOf(UserContext.get()));
         context.set(Map.of(
                 ChatSessionParamEnum.SESSION_ID, sessionId,

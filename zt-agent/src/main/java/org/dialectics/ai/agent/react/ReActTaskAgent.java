@@ -2,7 +2,7 @@ package org.dialectics.ai.agent.react;
 
 import lombok.extern.slf4j.Slf4j;
 import org.dialectics.ai.agent.Agent;
-import org.dialectics.ai.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentContext;
 import org.dialectics.ai.agent.domain.pojo.TaskNode;
 import org.dialectics.ai.agent.domain.vo.ReActEventVo;
 import org.dialectics.ai.agent.memory.ZChatMemory;
@@ -79,7 +79,7 @@ public class ReActTaskAgent implements Agent {
      * @return ReAct 事件流
      */
     @Override
-    public Flux<ReActEventVo> process(String task, AgentExecutionContext context) {
+    public Flux<ReActEventVo> process(String task, AgentContext context) {
         String conversationId = ChatSessionVisitor.conversationId(context);
         GenerateTypeEnum generateType = ChatSessionVisitor.generateType(context);
 
@@ -90,7 +90,6 @@ public class ReActTaskAgent implements Agent {
 
         chatMemory.add(conversationId, UserMessage.builder().text(task).build());
 
-        log.debug("[{}] 开始处理 ReAct 任务: task={}", conversationId, task);
         // 1. 初始化 ReAct 基础参数
         initReActAttributes(task, context);
         // 2. 加载工具链容器
@@ -109,7 +108,7 @@ public class ReActTaskAgent implements Agent {
      * 2. 会话相关参数（由Service层设置）
      * 3. 流程控制标志（取消、完成等）
      */
-    private void initReActAttributes(Object task, AgentExecutionContext context) {
+    private void initReActAttributes(Object task, AgentContext context) {
         String requestId = UUID.randomUUID().toString();
         context.set(Map.of(
                 ChatSessionParamEnum.REQUEST_ID, requestId,
@@ -131,7 +130,7 @@ public class ReActTaskAgent implements Agent {
     /**
      * 初始化工具链容器
      */
-    private void loadReActTools(AgentExecutionContext ctx) {
+    private void loadReActTools(AgentContext ctx) {
         ToolCallback reActOutputToolCallback = ReActOutputTool.createReActOutputToolCallback(toolCallbacks(ctx));
         ctx.set(TOOL_CALLBACK, reActOutputToolCallback);
     }
@@ -144,7 +143,7 @@ public class ReActTaskAgent implements Agent {
      * @param ctx 执行上下文
      * @return 工具提供者列表
      */
-    private List<ToolCallback> toolCallbacks(AgentExecutionContext ctx) {
+    private List<ToolCallback> toolCallbacks(AgentContext ctx) {
         List<ToolCallback> toolCallbacks = new ArrayList<>(Arrays.asList(ToolCallbacks.from(
                 new DoneTool(ctx),
                 new PlanTool()
@@ -171,7 +170,7 @@ public class ReActTaskAgent implements Agent {
     /**
      * Done工具
      */
-    protected record DoneTool(AgentExecutionContext context) {
+    protected record DoneTool(AgentContext context) {
         @Tool(name = "done", description = "任务完成")
         public String done(
                 @ToolParam(description = "任务完成情况的最终总结或困境说明") String text,

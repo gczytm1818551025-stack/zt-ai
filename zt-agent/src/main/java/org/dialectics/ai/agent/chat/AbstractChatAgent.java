@@ -1,7 +1,7 @@
 package org.dialectics.ai.agent.chat;
 
 import org.dialectics.ai.agent.Agent;
-import org.dialectics.ai.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentContext;
 import org.dialectics.ai.agent.utils.ChatSessionVisitor;
 import org.dialectics.ai.common.domain.EventVo;
 import org.springframework.ai.chat.client.ChatClient;
@@ -31,12 +31,12 @@ public abstract class AbstractChatAgent implements Agent {
      * @return 处理结果
      */
     @Override
-    public abstract Flux<? extends EventVo> process(String question, AgentExecutionContext context);
+    public abstract Flux<? extends EventVo> process(String question, AgentContext context);
 
     /**
      * 构造聊天智能体通用参数
      */
-    protected ChatClient.ChatClientRequestSpec buildChatRequestSpec(AgentExecutionContext context) {
+    protected ChatClient.ChatClientRequestSpec buildChatRequestSpec(AgentContext context) {
         return chatClient().prompt()
                 // 系统提示词模板及其所需参数
                 .system(s -> s.text(systemMessage()).params(systemMessageParams(context)))
@@ -71,7 +71,7 @@ public abstract class AbstractChatAgent implements Agent {
      *
      * @return 默认返回空Map
      */
-    Map<String, Object> systemMessageParams(AgentExecutionContext context) {
+    Map<String, Object> systemMessageParams(AgentContext context) {
         return Map.of();
     }
 
@@ -91,7 +91,7 @@ public abstract class AbstractChatAgent implements Agent {
      * @param context 当前Agent执行上下文
      * @return 默认返回空Map
      */
-    Map<String, Object> toolContext(AgentExecutionContext context) {
+    Map<String, Object> toolContext(AgentContext context) {
         return Map.of();
     }
 
@@ -110,7 +110,7 @@ public abstract class AbstractChatAgent implements Agent {
      * @param context 当前Agent执行上下文
      * @return 默认返回空Map
      */
-    Map<String, Object> advisorParams(AgentExecutionContext context) {
+    Map<String, Object> advisorParams(AgentContext context) {
         return Map.of();
     }
 

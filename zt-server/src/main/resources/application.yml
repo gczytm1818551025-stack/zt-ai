@@ -19,7 +19,7 @@ zt-ai:
   memory:
     maxMessages: 100
   file:
-    base: /Users/dialecticmaxism/Desktop
+    base: /Users/dialecticmaxism/tmp
     domain: http://localhost:18081
   # ReAct 异步执行配置
   react:
@@ -111,7 +111,7 @@ spring:
           time-between-eviction-runs: 60000
   ai:
     dashscope:
-      api-key: ${BAILIAN_KEY}
+      api-key: sk-d80d4c2994de46098680bbb842d07bd8 #${BAILIAN_KEY}
       chat:
         enabled: true
         options:

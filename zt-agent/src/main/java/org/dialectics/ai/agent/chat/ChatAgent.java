@@ -5,7 +5,7 @@ import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.dialectics.ai.agent.AgentExecutionContext;
+import org.dialectics.ai.agent.AgentContext;
 import org.dialectics.ai.agent.domain.vo.ChatEventVo;
 import org.dialectics.ai.agent.manager.ToolResultManager;
 import org.dialectics.ai.agent.memory.ZChatMemory;
@@ -58,7 +58,7 @@ public class ChatAgent extends AbstractChatAgent {
     }
 
     @Override
-    public Map<String, Object> advisorParams(AgentExecutionContext context) {
+    public Map<String, Object> advisorParams(AgentContext context) {
         // CONVERSATION_ID是MessageChatMemoryAdvisor的必需参数
         return Map.of(ChatMemory.CONVERSATION_ID, ChatSessionVisitor.conversationId(context));
     }
@@ -73,12 +73,12 @@ public class ChatAgent extends AbstractChatAgent {
     }
 
     @Override
-    public Flux<ChatEventVo> process(String question, AgentExecutionContext context) {
+    public Flux<ChatEventVo> process(String question, AgentContext ctx) {
         // 1.读取会话的关键上下文信息
-        GenerateTypeEnum type = ChatSessionVisitor.generateType(context);
-        Long userId = ChatSessionVisitor.userId(context);
-        String sessionId = ChatSessionVisitor.sessionId(context);
-        String conversationId = ChatSessionVisitor.conversationId(context);
+        GenerateTypeEnum type = ChatSessionVisitor.generateType(ctx);
+        Long userId = ChatSessionVisitor.userId(ctx);
+        String sessionId = ChatSessionVisitor.sessionId(ctx);
+        String conversationId = ChatSessionVisitor.conversationId(ctx);
 
         // 2.如果是“重新生成”类型的对话，删除最后两条问答记忆
         if (GenerateTypeEnum.REGENERATE.equals(type)) {
@@ -88,14 +88,14 @@ public class ChatAgent extends AbstractChatAgent {
         String requestId = IdUtil.fastSimpleUUID();
 
         // 4.补充完整agent会话上下文
-        context.set(Map.of(
+        ctx.set(Map.of(
                 ChatSessionParamEnum.QUESTION, question,
                 ChatSessionParamEnum.REQUEST_ID, requestId
         ));
 
         // 5.构建并背压对话请求
         StringBuilder assistantMsgBuilder = new StringBuilder();
-        return buildChatRequestSpec(context)
+        return buildChatRequestSpec(ctx)
                 .stream()
                 .chatResponse()
                 // 订阅建立时保存会话状态标记（带重试机制）
