@@ -1,0 +1,15 @@
+{
+  "currentState": {
+    "previousEvaluation": "未知",
+    "memory": "尚未执行任何子任务，需要开始规划从昆明到玉溪的导航路线。",
+    "thinking": "我需要获取从昆明到玉溪的完整导航路线。高德地图技能（amap-skill）提供了导航路线规划功能，这正是我需要的。首先，我需要确定昆明和玉溪的地理坐标，然后使用这些坐标来规划驾驶路线。"
+  },
+  "action": [
+    {
+      "generateNext": {
+        "skillName": "amap-skill",
+        "taskContent": "获取昆明的地理坐标"
+      }
+    }
+  ]
+}

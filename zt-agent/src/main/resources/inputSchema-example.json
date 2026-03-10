@@ -1,0 +1,391 @@
+{
+  "type": "object",
+  "properties": {
+    "currentState": {
+      "type": "object",
+      "properties": {
+        "previousEvaluation": {
+          "type": "string"
+        },
+        "memory": {
+          "type": "string"
+        },
+        "thinking": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "previousEvaluation",
+        "memory",
+        "thinking"
+      ]
+    },
+    "action": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "done": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "任务完成情况的最终总结和关键点说明，若失败则为原因分析"
+              },
+              "success": {
+                "type": "boolean",
+                "description": "任务是否成功"
+              }
+            },
+            "required": [
+              "text",
+              "success"
+            ],
+            "additionalProperties": false
+          },
+          "generateNext": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "skillName": {
+                "type": "string",
+                "description": "skill名称"
+              },
+              "taskContent": {
+                "type": "string",
+                "description": "子任务内容"
+              }
+            },
+            "required": [
+              "skillName",
+              "taskContent"
+            ],
+            "additionalProperties": false
+          },
+          "zt-ai_amap_sse_maps_direction_bicycling": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "出发点经纬度，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "目的地经纬度，坐标格式为：经度，纬度"
+              }
+            },
+            "required": [
+              "origin",
+              "destination"
+            ]
+          },
+          "zt-ai_amap_sse_maps_direction_driving": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "出发点经纬度，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "目的地经纬度，坐标格式为：经度，纬度"
+              }
+            },
+            "required": [
+              "origin",
+              "destination"
+            ]
+          },
+          "zt-ai_amap_sse_maps_direction_transit_integrated": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "出发点经纬度，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "目的地经纬度，坐标格式为：经度，纬度"
+              },
+              "city": {
+                "type": "string",
+                "description": "公共交通规划起点城市"
+              },
+              "cityd": {
+                "type": "string",
+                "description": "公共交通规划终点城市"
+              }
+            },
+            "required": [
+              "origin",
+              "destination",
+              "city",
+              "cityd"
+            ]
+          },
+          "zt-ai_amap_sse_maps_direction_walking": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "出发点经度，纬度，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "目的地经度，纬度，坐标格式为：经度，纬度"
+              }
+            },
+            "required": [
+              "origin",
+              "destination"
+            ]
+          },
+          "zt-ai_amap_sse_maps_distance": {
+            "type": "object",
+            "properties": {
+              "origins": {
+                "type": "string",
+                "description": "起点经度，纬度，可以传多个坐标，使用竖线隔离，比如120,30|120,31，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "终点经度，纬度，坐标格式为：经度，纬度"
+              },
+              "type": {
+                "type": "string",
+                "description": "距离测量类型,1代表驾车距离测量，0代表直线距离测量，3步行距离测量"
+              }
+            },
+            "required": [
+              "origins",
+              "destination"
+            ]
+          },
+          "zt-ai_amap_sse_maps_geo": {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string",
+                "description": "待解析的结构化地址信息"
+              },
+              "city": {
+                "type": "string",
+                "description": "指定查询的城市"
+              }
+            },
+            "required": [
+              "address"
+            ]
+          },
+          "zt-ai_amap_sse_maps_regeocode": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "经纬度"
+              }
+            },
+            "required": [
+              "location"
+            ]
+          },
+          "zt-ai_amap_sse_maps_ip_location": {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "type": "string",
+                "description": "IP地址"
+              }
+            },
+            "required": [
+              "ip"
+            ]
+          },
+          "zt-ai_amap_sse_maps_schema_personal_map": {
+            "type": "object",
+            "properties": {
+              "orgName": {
+                "type": "string",
+                "description": "行程规划地图小程序名称"
+              },
+              "lineList": {
+                "type": "array",
+                "description": "行程列表",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "description": "行程名称描述（按行程顺序）"
+                    },
+                    "pointInfoList": {
+                      "type": "array",
+                      "description": "行程目标位置点描述",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "行程目标位置点名称"
+                          },
+                          "lon": {
+                            "type": "number",
+                            "description": "行程目标位置点经度"
+                          },
+                          "lat": {
+                            "type": "number",
+                            "description": "行程目标位置点纬度"
+                          },
+                          "poiId": {
+                            "type": "string",
+                            "description": "行程目标位置点POIID"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "lon",
+                          "lat",
+                          "poiId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "pointInfoList"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "orgName",
+              "lineList"
+            ]
+          },
+          "zt-ai_amap_sse_maps_around_search": {
+            "type": "object",
+            "properties": {
+              "keywords": {
+                "type": "string",
+                "description": "搜索关键词"
+              },
+              "location": {
+                "type": "string",
+                "description": "中心点经度纬度"
+              },
+              "radius": {
+                "type": "string",
+                "description": "搜索半径"
+              }
+            },
+            "required": [
+              "keywords",
+              "location"
+            ]
+          },
+          "zt-ai_amap_sse_maps_search_detail": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "关键词搜或者周边搜获取到的POI ID"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          "zt-ai_amap_sse_maps_text_search": {
+            "type": "object",
+            "properties": {
+              "keywords": {
+                "type": "string",
+                "description": "查询关键字"
+              },
+              "city": {
+                "type": "string",
+                "description": "查询城市"
+              },
+              "citylimit": {
+                "type": "boolean",
+                "default": false,
+                "description": "是否限制城市范围内搜索，默认不限制"
+              }
+            },
+            "required": [
+              "keywords"
+            ]
+          },
+          "zt-ai_amap_sse_maps_schema_navi": {
+            "type": "object",
+            "properties": {
+              "lon": {
+                "type": "string",
+                "description": "终点经度"
+              },
+              "lat": {
+                "type": "string",
+                "description": "终点纬度"
+              }
+            },
+            "required": [
+              "lon",
+              "lat"
+            ]
+          },
+          "zt-ai_amap_sse_maps_schema_take_taxi": {
+            "type": "object",
+            "properties": {
+              "slon": {
+                "type": "string",
+                "description": "起点经度"
+              },
+              "slat": {
+                "type": "string",
+                "description": "起点纬度"
+              },
+              "sname": {
+                "type": "string",
+                "description": "起点名称"
+              },
+              "dlon": {
+                "type": "string",
+                "description": "终点经度"
+              },
+              "dlat": {
+                "type": "string",
+                "description": "终点纬度"
+              },
+              "dname": {
+                "type": "string",
+                "description": "终点名称"
+              }
+            },
+            "required": [
+              "dlon",
+              "dlat",
+              "dname"
+            ]
+          },
+          "zt-ai_amap_sse_maps_weather": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "城市名称或者adcode"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "currentState",
+    "action"
+  ]
+}
