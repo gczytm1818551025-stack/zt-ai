@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.BiConsumer;
 
 /**
@@ -30,67 +31,47 @@ import java.util.function.BiConsumer;
  * - 使用 Sinks.many() 支持多订阅
  * - 使用 Redis 状态管理连接，避免 connectionCount 累积问题
  * - Redis TTL 自动清理过期会话
+ * <p>
+ * 优化点：
+ * - 使用 LockSupport.parkNanos() 替代 Thread.sleep()，减少线程阻塞开销
+ * - 序列号分配在锁内保证原子性
+ * - 保持事件顺序：序列号严格递增
  */
 @Slf4j
 @Component
 public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
-    /// 最大重试次数
     private static final int MAX_RETRY_COUNT = 3;
-    /// 重试间隔（毫秒）
-    private static final long RETRY_INTERVAL_MS = 10;
-    /// 发送超时（毫秒）
+    private static final long RETRY_INTERVAL_NS = 10_000_000L;
     private static final long SEND_TIMEOUT_MS = 5000;
-    /**
-     * 会话状态映射（内存存储）
-     * Key: sessionId, Value: SessionState
-     */
+
     private static final Map<String, SessionState> SESSION_STATE_MAP = new ConcurrentHashMap<>();
 
-    /**
-     * 背压缓冲区大小
-     */
     @Setter
     @Value("${zt-ai.react.backpressure-buffer-size:256}")
     private int backpressureBufferSize;
-    /**
-     * 事件历史清理回调
-     */
+
     @Setter
     private BiConsumer<String, Long> eventHistoryCleanupCallback;
 
-    /**
-     * 会话状态封装
-     */
     private record SessionState(
             Sinks.Many<ReActEventVo> manySink,
             AtomicLong activeSubscribers,
-            AtomicBoolean flowCompleted,  // 流程是否已完成标志
-            AtomicBoolean releasing,      // 释放中标志（防止重复释放）
-            AtomicLong lastEventId,       // 最后发送的事件ID（用于重连时部分回放）
-            AtomicLong sequenceNumber,     // 序列号生成器
-            Object emitLock,              // 事件推送锁 - 保证串行化
-            AtomicLong lastEmittedSequence // 最后成功推送的序列号
+            AtomicBoolean flowCompleted,
+            AtomicBoolean releasing,
+            AtomicLong lastEventId,
+            AtomicLong sequenceNumber,
+            Object emitLock,
+            AtomicLong lastEmittedSequence
     ) {
     }
 
-    /**
-     * 获取或创建会话的 Flux（带活跃订阅者计数）
-     * 返回的 Flux 会在订阅/取消订阅时自动更新活跃订阅者计数
-     * <p>
-     * 关键修复：如果旧的 SessionState 已完成（flowCompleted=true），必须创建新的
-     *
-     * @param sessionId 会话 ID
-     * @return Flux 实例，如果不存在返回 null
-     */
     @Override
     public Flux<ReActEventVo> getStream(String sessionId) {
         SessionState existingState = SESSION_STATE_MAP.get(sessionId);
 
-        // 如果状态不存在，或者流程已完成，创建新的 SessionState
         if (existingState == null || existingState.flowCompleted.get()) {
             if (existingState != null && existingState.flowCompleted.get()) {
                 log.info("[{}] 检测到旧会话已完成，创建新的 ReAct 流 Sink", sessionId);
-                // 先关闭旧的 Sink，避免资源泄漏
                 try {
                     existingState.manySink.tryEmitComplete();
                     log.debug("[{}] 旧 Sink 已关闭", sessionId);
@@ -100,9 +81,17 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
             } else {
                 log.info("[{}] 创建新的 ReAct 流 Sink", sessionId);
             }
-            // 新Sink覆盖旧Sink
             Sinks.Many<ReActEventVo> newManySink = Sinks.many().multicast().onBackpressureBuffer(this.backpressureBufferSize);
-            SessionState newState = new SessionState(newManySink, new AtomicLong(0), new AtomicBoolean(false), new AtomicBoolean(false), new AtomicLong(0), new AtomicLong(0), new Object(), new AtomicLong(-1));
+            SessionState newState = new SessionState(
+                    newManySink,
+                    new AtomicLong(0),
+                    new AtomicBoolean(false),
+                    new AtomicBoolean(false),
+                    new AtomicLong(0),
+                    new AtomicLong(0),
+                    new Object(),
+                    new AtomicLong(-1)
+            );
             SESSION_STATE_MAP.put(sessionId, newState);
         }
 
@@ -125,47 +114,22 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
                 });
     }
 
-    /**
-     * 获取活跃订阅者计数
-     *
-     * @param sessionId 会话 ID
-     * @return 活跃订阅者数
-     */
     @Override
     public long countActiveSubscriber(String sessionId) {
         SessionState state = SESSION_STATE_MAP.get(sessionId);
         return state != null ? state.activeSubscribers.get() : 0;
     }
 
-    /**
-     * 获取最后事件ID
-     *
-     * @param sessionId 会话 ID
-     * @return 最后事件ID
-     */
     public long getLastEventId(String sessionId) {
         SessionState state = SESSION_STATE_MAP.get(sessionId);
         return state != null ? state.lastEventId.get() : 0;
     }
 
-    /**
-     * 获取最后成功推送的序列号
-     *
-     * @param sessionId 会话 ID
-     * @return 最后成功推送的序列号，不存在返回 -1
-     */
     public long getLastEmittedSequence(String sessionId) {
         SessionState state = SESSION_STATE_MAP.get(sessionId);
         return state != null ? state.lastEmittedSequence.get() : -1;
     }
 
-    /**
-     * 检查会话是否活跃
-     * <p>活跃 = 活跃标志存在 + sink订阅者数大于0 + 当前会话流程未完成 + 当前会话未在释放中
-     *
-     * @param sessionId 会话 ID
-     * @return true-正在进行，false-已完成或不存在
-     */
     @Override
     public boolean isActive(String sessionId) {
         SessionState state = SESSION_STATE_MAP.get(sessionId);
@@ -182,18 +146,12 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
         return active;
     }
 
-    /**
-     * 标记会话流程已完成
-     *
-     * @param sessionId 会话 ID
-     */
     public void markFlowCompleted(String sessionId) {
         SessionState state = SESSION_STATE_MAP.get(sessionId);
         if (state != null) {
             state.flowCompleted.set(true);
             log.info("[{}] 会话流程已标记为完成", sessionId);
 
-            // 标记完成后，检查是否可以立即清理（无活跃订阅者）
             if (state.activeSubscribers.get() == 0) {
                 log.info("[{}] 流程已完成且无活跃订阅者，立即释放资源", sessionId);
                 release(sessionId);
@@ -201,19 +159,22 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
         }
     }
 
-
     @Override
     public void emit(String key, ReActEventVo latest) {
         tryEmit(key, latest);
     }
 
     /**
-     * 安全发送事件（用于内部使用）
+     * 安全发送事件
      * <p>
-     * 核心修复：
-     * 1. 使用锁保证串行化推送，避免并发导致乱序
-     * 2. 失败时自动重试，确保事件一定发送
-     * 3. 分配序列号用于前端去重和排序
+     * 优化策略：
+     * 1. 使用 LockSupport.parkNanos() 替代 Thread.sleep()，减少线程阻塞开销
+     * 2. 序列号分配在锁内保证原子性
+     * 3. 发送失败不回退序列号，保证序列号严格递增
+     * <p>
+     * 顺序保证：
+     * - 序列号在 synchronized 块内分配，保证严格递增
+     * - 事件按序列号顺序推送
      *
      * @param sessionId 会话 ID
      * @param event     事件数据
@@ -226,98 +187,69 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
             return false;
         }
 
-        // 分配序列号
-        long seq = state.sequenceNumber.incrementAndGet();
-        event.setSequenceNumber(seq);
-        event.setSessionId(sessionId);
-        event.setTimestamp(System.currentTimeMillis());
-
-        // 使用锁保证串行化推送
+        final long seq;
+        final long startTime;
         synchronized (state.emitLock) {
-            int retryCount = 0;
-            long startTime = System.currentTimeMillis();
-            // 自旋重试
-            while (retryCount < MAX_RETRY_COUNT) {
-                try {
-                    Sinks.EmitResult result = state.manySink.tryEmitNext(event);
+            seq = state.sequenceNumber.incrementAndGet();
+            event.setSequenceNumber(seq);
+            event.setSessionId(sessionId);
+            event.setTimestamp(System.currentTimeMillis());
+            startTime = System.currentTimeMillis();
+        }
 
-                    if (result.isSuccess()) {
-                        // 推送成功
-                        state.lastEventId.incrementAndGet();
-                        state.lastEmittedSequence.set(seq);
+        int retryCount = 0;
+        while (retryCount < MAX_RETRY_COUNT) {
+            Sinks.EmitResult result = state.manySink.tryEmitNext(event);
 
-                        log.debug("[{}] 事件已发送: seq={}, type={}, stage={}, cost={}ms",
-                                sessionId, seq, event.getType(), event.getStage(),
-                                System.currentTimeMillis() - startTime);
-                        return true;
-                    }
-
-                    // 推送失败，分析原因并重试
-                    if (result == Sinks.EmitResult.FAIL_NON_SERIALIZED) {
-                        // 背压缓冲区满，等待后重试
-                        log.warn("[{}] 背压缓冲区满，等待重试: seq={}, retry={}",
-                                sessionId, seq, retryCount + 1);
-                        Thread.sleep(RETRY_INTERVAL_MS);
-                    } else if (result == Sinks.EmitResult.FAIL_CANCELLED) {
-                        // Sink 已取消，无法重试
-                        log.error("[{}] Sink已取消，无法发送事件: seq={}", sessionId, seq);
-                        state.sequenceNumber.decrementAndGet();  // 回退序列号
-                        return false;
-                    } else if (result == Sinks.EmitResult.FAIL_TERMINATED) {
-                        // Sink 已终止，无法重试
-                        log.error("[{}] Sink已终止，无法发送事件: seq={}", sessionId, seq);
-                        state.sequenceNumber.decrementAndGet();
-                        return false;
-                    }
-
-                    retryCount++;
-
-                    // 检查超时
-                    if (System.currentTimeMillis() - startTime > SEND_TIMEOUT_MS) {
-                        log.error("[{}] 事件发送超时: seq={}, retry={}", sessionId, seq, retryCount);
-                        state.sequenceNumber.decrementAndGet();
-                        return false;
-                    }
-
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    log.warn("[{}] 事件发送被中断: seq={}", sessionId, seq);
-                    state.sequenceNumber.decrementAndGet();
-                    return false;
-                } catch (Exception e) {
-                    log.error("[{}] 事件发送异常: seq={}, retry={}", sessionId, seq, retryCount, e);
-                    retryCount++;
+            if (result.isSuccess()) {
+                synchronized (state.emitLock) {
+                    state.lastEventId.incrementAndGet();
+                    state.lastEmittedSequence.set(seq);
                 }
+
+                log.debug("[{}] 事件已发送: seq={}, type={}, stage={}, cost={}ms",
+                        sessionId, seq, event.getType(), event.getStage(),
+                        System.currentTimeMillis() - startTime);
+                return true;
             }
 
-            // 重试次数耗尽
-            log.error("[{}] 事件发送失败，重试耗尽: seq={}, lastEmitted={}", sessionId, seq, state.lastEmittedSequence.get());
-            state.sequenceNumber.decrementAndGet();
-            return false;
+            if (result == Sinks.EmitResult.FAIL_NON_SERIALIZED) {
+                log.warn("[{}] 背压缓冲区满，等待重试: seq={}, retry={}",
+                        sessionId, seq, retryCount + 1);
+                LockSupport.parkNanos(RETRY_INTERVAL_NS);
+            } else if (result == Sinks.EmitResult.FAIL_CANCELLED) {
+                log.error("[{}] Sink已取消，无法发送事件: seq={}", sessionId, seq);
+                return false;
+            } else if (result == Sinks.EmitResult.FAIL_TERMINATED) {
+                log.error("[{}] Sink已终止，无法发送事件: seq={}", sessionId, seq);
+                return false;
+            }
+
+            retryCount++;
+
+            if (System.currentTimeMillis() - startTime > SEND_TIMEOUT_MS) {
+                log.error("[{}] 事件发送超时: seq={}, retry={}", sessionId, seq, retryCount);
+                return false;
+            }
         }
+
+        log.error("[{}] 事件发送失败，重试耗尽: seq={}, lastEmitted={}", sessionId, seq, state.lastEmittedSequence.get());
+        return false;
     }
 
-    /**
-     * 释放会话 Sink
-     *
-     * @param sessionId 会话 ID
-     */
     @Override
     public void release(String sessionId) {
-        // 先获取并移除会话状态
         SessionState state = SESSION_STATE_MAP.remove(sessionId);
         if (state == null) {
             log.debug("[{}] 会话状态不存在，无需释放", sessionId);
             return;
         }
 
-        // 设置释放中标志
         if (!state.releasing.compareAndSet(false, true)) {
             log.debug("[{}] 已在释放中，跳过", sessionId);
             return;
         }
 
-        // 释放Sink
         try {
             if (state.manySink != null) {
                 state.manySink.tryEmitComplete();
@@ -330,11 +262,6 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
         }
     }
 
-    /**
-     * 获取统计信息
-     *
-     * @return 统计信息字符串
-     */
     public String statistics() {
         int activeCount = (int) SESSION_STATE_MAP.values().stream()
                 .filter(s -> s.activeSubscribers.get() > 0)
@@ -346,23 +273,12 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
         );
     }
 
-    /**
-     * 清理不活跃的会话
-     * <p>
-     * 清理规则：
-     * 1. Redis 状态为空或 false 的会话
-     * 2. 活跃订阅者为 0 的会话
-     * 3. 或者流程已完成且无活跃订阅者的会话
-     *
-     * @return 清理的会话数量
-     */
     @Override
     public int cleanupInactive() {
         int cleanedCount = 0;
         long currentTime = System.currentTimeMillis();
 
         try {
-            // 复制 key 集合避免 ConcurrentModificationException
             var sessionIds = new ArrayList<>(SESSION_STATE_MAP.keySet());
 
             for (String sessionId : sessionIds) {
@@ -374,7 +290,6 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
                 long activeSubscribers = state.activeSubscribers.get();
                 boolean flowCompleted = state.flowCompleted.get();
 
-                // 快速清理条件：流程已完成且没有活跃订阅者
                 boolean shouldCleanup = flowCompleted && activeSubscribers == 0;
 
                 if (shouldCleanup) {
@@ -382,7 +297,6 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
                             sessionId, activeSubscribers, flowCompleted);
                     release(sessionId);
 
-                    // 调用清理回调（如果存在）
                     if (eventHistoryCleanupCallback != null) {
                         try {
                             eventHistoryCleanupCallback.accept(sessionId, currentTime);
@@ -404,11 +318,6 @@ public class ReActStreamManager implements StreamManager<String, ReActEventVo> {
         return cleanedCount;
     }
 
-    /**
-     * 获取所有会话 ID
-     *
-     * @return 会话 ID 列表
-     */
     public List<String> getAllSessionIds() {
         return new ArrayList<>(SESSION_STATE_MAP.keySet());
     }

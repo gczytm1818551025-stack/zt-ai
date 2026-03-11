@@ -25,6 +25,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.core.scheduler.Scheduler;
 
 import jakarta.annotation.Resource;
@@ -64,6 +65,10 @@ import org.dialectics.ai.agent.service.SessionService;
  * - 使用 Reactor 背压机制和调度器配置控制并发
  * - llmScheduler 和 toolScheduler 配置线程池大小
  * - StreamManager 的 Sinks.Many 配置背压缓冲区
+ * <p>
+ * 优化点：
+ * - 使用递归 flatMap 替代 repeat()，减少调度开销
+ * - 保持上下文连续性，避免重新订阅
  */
 @Slf4j
 @Component
@@ -101,33 +106,25 @@ public class ReActFlowOrchestrator {
 
         log.info("[{}] 开始 ReAct 流程: taskId={}, sessionId={}", requestId, task, sessionId);
 
-        // 获取数据源Flux
         Flux<ReActEventVo> dataSource = streamManager.getStream(sessionId);
-        log.info("[{}] 启动ReAct流程: sessionId={}", requestId, sessionId);
-        // 设置活跃状态标志
         String reactStatusKey = RedisConstant.REACT_STATUS_KEY_PREFIX + sessionId;
         RedisRetryUtils.safeSet(redisTemplate, reactStatusKey, "active", Duration.ofHours(1));
 
-        // 添加系统提示词
         List<Message> messages = messageMemory(ctx);
         messages.add(SystemMessage.builder().text(PromptManager.renderFrom(PromptNameConstant.REACT_SYSTEM)).build());
 
-        // 创建空的AssistantMessage用于流式追加所有步骤内容
         chatMemory.add(conversationId, new ZAssistantMessage(""));
         log.debug("[{}] 初始化 ReAct 消息: conversationId={}", requestId, conversationId);
 
-        // 记录请求开始
         metrics.recordRequestStart();
         Timer.Sample totalTimer = metrics.startTotalTimer();
 
-        // 获取配置
         int maxStep = properties.getMaxStep();
         Duration requestTimeout = Duration.ofSeconds(properties.getRequestTimeoutSeconds());
         AtomicBoolean timerStopped = new AtomicBoolean(false);
 
-        // 启动异步编排——直接订阅 Flux，使用 Reactor 背压和调度器控制并发
-        reActLoop(ctx, maxStep, requestTimeout)
-                .doOnComplete(() -> {
+        reActLoopRecursive(ctx, maxStep, requestTimeout)
+                .doOnSuccess(v -> {
                     handleSuccess(ctx, totalTimer);
                     timerStopped.set(true);
                 })
@@ -136,13 +133,11 @@ public class ReActFlowOrchestrator {
                     timerStopped.set(true);
                 })
                 .doFinally(signal -> {
-                    // 确保在失败情况下也发送 STOP 事件
-                    if (!"onComplete".equals(signal.name())) {
+                    if (signal != SignalType.ON_COMPLETE) {
                         streamManager.emit(sessionId, ReActEventVo.stopEvent());
                         log.debug("[{}] 停止事件已发送: signal={}", requestId, signal);
                     }
 
-                    // 停止计时器并记录指标
                     if (timerStopped.compareAndSet(false, true)) {
                         try {
                             metrics.recordTotalDuration(totalTimer);
@@ -151,9 +146,7 @@ public class ReActFlowOrchestrator {
                         }
                     }
 
-                    // 标记流程完成，管理Sink释放
                     streamManager.markFlowCompleted(sessionId);
-                    // 清除会话活跃状态
                     RedisRetryUtils.safeDelete(redisTemplate, reactStatusKey);
                     metrics.recordComplete();
                     log.debug("[{}] 流程完成，释放资源: signal={}", requestId, signal);
@@ -161,18 +154,13 @@ public class ReActFlowOrchestrator {
                 .subscribeOn(scheduler)
                 .subscribe();
 
-        // 返回Flux
         return dataSource.doOnCancel(() -> {
             log.info("[{}] 客户端取消订阅", requestId(ctx));
-            // 刷新对话标题
             flushChatTitle(ctx);
 
-            // 客户端取消时，如果 ReAct 流程仍在进行，主动清理资源
             if (RedisRetryUtils.safeHasKey(redisTemplate, reactStatusKey)) {
                 log.info("[{}] 客户端取消，主动清理 ReAct 会话资源: sessionId={}", requestId(ctx), sessionId(ctx));
-                // 清除 Redis 状态
                 RedisRetryUtils.safeDelete(redisTemplate, reactStatusKey);
-                // 释放 Sink 并发送 STOP 事件
                 streamManager.release(sessionId(ctx));
                 streamManager.tryEmit(sessionId(ctx), ReActEventVo.stopEvent());
                 log.info("[{}] ReAct 会话资源已清理: sessionId={}", requestId(ctx), sessionId(ctx));
@@ -181,32 +169,44 @@ public class ReActFlowOrchestrator {
     }
 
     /**
-     * 编排ReAct循环
+     * 递归执行ReAct循环
+     * <p>
+     * 优化说明：
+     * - 使用递归 flatMap 替代 repeat()，减少调度开销
+     * - 保持上下文连续性，避免重新订阅
+     * - 三步骤顺序执行保证不变
+     *
+     * @param ctx            执行上下文
+     * @param remainingSteps 剩余步数
+     * @param requestTimeout 请求超时
+     * @return Mono<Void>
      */
-    private Flux<Void> reActLoop(AgentContext ctx, int maxStep, Duration requestTimeout) {
-        String reactStatusKey = RedisConstant.REACT_STATUS_KEY_PREFIX + sessionId(ctx);
-
+    private Mono<Void> reActLoopRecursive(AgentContext ctx, int remainingSteps, Duration requestTimeout) {
         return Mono.defer(() -> {
-                    // 检查管道是否活跃
+                    String reactStatusKey = RedisConstant.REACT_STATUS_KEY_PREFIX + sessionId(ctx);
+
                     if (!RedisRetryUtils.safeHasKey(redisTemplate, reactStatusKey)) {
                         log.info("[{}] 会话状态不存在，任务被停止: sessionId={}", requestId(ctx), sessionId(ctx));
                         return Mono.error(new ReActFlowException("reAct任务已终止，sessionId=" + sessionId(ctx)));
                     }
-                    // 检查是否已完成（handleSuccess之后）
+
                     if (completed(ctx).get()) {
                         return Mono.empty();
                     }
 
-                    // 检查是否需要超过步数限制还未结束
-                    if (stepCount(ctx).get() >= maxStep && !completed(ctx).get()) {
+                    if (stepCount(ctx).get() >= remainingSteps && !completed(ctx).get()) {
                         log.info("[{}] 达到最大步数限制，添加终止提示", requestId(ctx));
-                        // 设置终止标志
                         terminatedFlag(ctx).set(true);
                     }
-                    // 执行单步ReAct流程
-                    return executeOneStep(ctx);
+
+                    return executeOneStep(ctx)
+                            .then(Mono.defer(() -> {
+                                if (shouldContinue(ctx, remainingSteps)) {
+                                    return reActLoopRecursive(ctx, remainingSteps, requestTimeout);
+                                }
+                                return Mono.empty();
+                            }));
                 })
-                .repeat(() -> RedisRetryUtils.safeHasKey(redisTemplate, reactStatusKey) && !completed(ctx).get() && stepCount(ctx).get() <= maxStep)
                 .timeout(requestTimeout, Mono.error(new ReActFlowException.TimeoutException("请求超时")))
                 .onErrorResume(ReActFlowException.TimeoutException.class, e -> {
                     log.warn("[{}] 请求超时", requestId(ctx));
@@ -215,14 +215,26 @@ public class ReActFlowOrchestrator {
     }
 
     /**
+     * 判断是否应该继续执行
+     *
+     * @param ctx     执行上下文
+     * @param maxStep 最大步数
+     * @return true-继续执行，false-停止
+     */
+    private boolean shouldContinue(AgentContext ctx, int maxStep) {
+        String reactStatusKey = RedisConstant.REACT_STATUS_KEY_PREFIX + sessionId(ctx);
+        return RedisRetryUtils.safeHasKey(redisTemplate, reactStatusKey)
+                && !completed(ctx).get()
+                && stepCount(ctx).get() < maxStep;
+    }
+
+    /**
      * 单步执行ReAct (observe → think → act)
      */
     private Mono<Void> executeOneStep(AgentContext ctx) {
         String conversationId = conversationId(ctx);
-        // observe
         return asyncExecutor.observe(ctx)
                 .flatMap(observeResult -> {
-                    // 发送规划事件
                     ReActOutput.StepTrace stepTrace = observeResult.stepTrace();
                     ReActEventVo.PlanData planData = new ReActEventVo.PlanData(
                             taskChain(ctx).size(),
@@ -233,7 +245,6 @@ public class ReActFlowOrchestrator {
                     );
                     emitEvent(ReActEventVo.newDataEvent(planData, ReActStageEnum.TASK_PLAN), ctx);
 
-                    // 追加规划步骤到对话记忆
                     Map<String, Object> planDataMap = Map.of(
                             "type", ReActStageEnum.TASK_PLAN.getCode(),
                             "index", taskChain(ctx).size(),
@@ -251,10 +262,8 @@ public class ReActFlowOrchestrator {
                     });
                     log.debug("[{}] 追加规划步骤: stepIndex={}", requestId(ctx), taskChain(ctx).size());
 
-                    // think
                     return asyncExecutor.think(ctx)
                             .flatMap(thinkResult -> {
-                                // 发送思考内容事件
                                 String thinkingText = thinkResult.thinkOutput().assistantMessage().getText();
                                 ReActEventVo.ThinkData thinkData;
                                 String stepTraceJson = JsonFinder.findFirst(thinkingText);
@@ -267,7 +276,6 @@ public class ReActFlowOrchestrator {
                                 ReActEventVo thinkEvent = ReActEventVo.newDataEvent(thinkData, ReActStageEnum.STRATEGY_THINK);
                                 emitEvent(thinkEvent, ctx);
 
-                                // 追加思考步骤到对话记忆
                                 Map<String, Object> thinkDataMap = Map.of(
                                         "type", ReActStageEnum.STRATEGY_THINK.getCode(),
                                         "thinkContent", thinkData.thinkContent()
@@ -281,10 +289,8 @@ public class ReActFlowOrchestrator {
                                 });
                                 log.debug("[{}] 追加思考步骤", requestId(ctx));
 
-                                // act并发送行动结果事件
                                 return asyncExecutor.act(thinkResult.thinkOutput(), ctx)
                                         .flatMap(actResult -> {
-                                            // 发送行动结果事件
                                             ReActEventVo.ActionData actionData = new ReActEventVo.ActionData(
                                                     actResult.success(),
                                                     actResult.result()
@@ -292,24 +298,22 @@ public class ReActFlowOrchestrator {
                                             ReActEventVo actEvent = ReActEventVo.newDataEvent(actionData, ReActStageEnum.ACTION_RESULT);
                                             emitEvent(actEvent, ctx);
 
-                                            // 追加行动步骤到对话记忆
                                             Map<String, Object> actionDataMap = Map.of(
                                                     "type", ReActStageEnum.ACTION_RESULT.getCode(),
                                                     "success", actionData.success(),
                                                     "result", actionData.result(),
-                                                    "resultType", 1 // 默认为文本类型
+                                                    "resultType", 1
                                             );
 
                                             chatMemory.add(conversationId, chatMemoryRepository, repository -> {
                                                 ZAssistantMessage lastMsg = (ZAssistantMessage) repository.findLastByConversationId(conversationId);
                                                 lastMsg.addStep(actionDataMap);
-                                                lastMsg.incrementStepCount(); // act步骤结束代表完整一步执行完毕，步数+1
+                                                lastMsg.incrementStepCount();
                                                 repository.deleteLastNByConversationId(conversationId, 1);
                                                 return lastMsg;
                                             });
                                             log.debug("[{}] 追加行动步骤: success={}", requestId(ctx), actionData.success());
 
-                                            // observe-think-act单步完成，增加步数
                                             stepCount(ctx).incrementAndGet();
                                             log.debug("[{}] 步数增加: currentStep={}", requestId(ctx), stepCount(ctx).get());
 
@@ -328,7 +332,6 @@ public class ReActFlowOrchestrator {
      * 处理成功
      */
     private void handleSuccess(AgentContext ctx, Timer.Sample totalTimer) {
-        // 发送最终结果
         Object finalResult = finalResult(ctx);
 
         if (null != finalResult) {
@@ -338,21 +341,18 @@ public class ReActFlowOrchestrator {
             finalResult = "任务已中断";
         }
 
-        // 发送最终结果事件
         ReActEventVo finalResultEvent = ReActEventVo.newDataEvent(new ReActEventVo.FinalData((String) finalResult), ReActStageEnum.FINAL_SUMMARY);
         emitEvent(finalResultEvent, ctx);
         log.info("[{}] FINAL_SUMMARY 事件已发送: finalResult={}", requestId(ctx), finalResult);
 
-        // 发送停止事件
         streamManager.emit(sessionId(ctx), ReActEventVo.stopEvent());
         log.info("[{}] STOP 事件已发送", requestId(ctx));
 
-        // 追加最终结果记忆
         final Object ffResult = finalResult;
         chatMemory.add(conversationId(ctx), chatMemoryRepository, repository -> {
             ZAssistantMessage lastMsg = (ZAssistantMessage) chatMemoryRepository.findLastByConversationId(conversationId(ctx));
             AssistantMessage updatedMsg = new ZAssistantMessage(
-                    (String) ffResult, // 更新content（AssistantMessage的content不可变）
+                    (String) ffResult,
                     lastMsg.getMetadata(),
                     lastMsg.getToolCalls(),
                     lastMsg.getMedia(),
@@ -365,7 +365,6 @@ public class ReActFlowOrchestrator {
         });
         log.debug("[{}] 追加最终结果", requestId(ctx));
 
-        // 记录资源信息
         metrics.recordSuccess();
         long durationNanos = metrics.recordTotalDuration(totalTimer);
         long durationMs = durationNanos / 1_000_000;
@@ -376,7 +375,6 @@ public class ReActFlowOrchestrator {
 
         metrics.recordSteps(stepCount(ctx).get());
 
-        // 刷新对话标题
         flushChatTitle(ctx);
     }
 
@@ -387,18 +385,14 @@ public class ReActFlowOrchestrator {
         metrics.recordFailure(error.getClass().getSimpleName());
         log.error("[{}] 任务失败: conversationId={}, error={}", requestId(ctx), conversationId(ctx), error.getMessage(), error);
 
-        // 在错误情况下追加提示信息
-        String errorMsg = "任务已终止"/* + error.getMessage()*/;
+        String errorMsg = "任务已终止";
 
-        // 发送最终结果事件
         ReActEventVo finalResultEvent = ReActEventVo.newDataEvent(new ReActEventVo.FinalData(errorMsg), ReActStageEnum.FINAL_SUMMARY);
         emitEvent(finalResultEvent, ctx);
         log.info("[{}] FINAL_SUMMARY 事件已发送: finalResult={}", requestId(ctx), errorMsg);
 
-        // 追加最终结果记忆
         chatMemory.add(conversationId(ctx), chatMemoryRepository, repository -> {
             ZAssistantMessage lastMsg = (ZAssistantMessage) chatMemoryRepository.findLastByConversationId(conversationId(ctx));
-            // 追加错误信息到 content
             String currentContent = lastMsg.getText() != null ? lastMsg.getText() + errorMsg : "";
             AssistantMessage updatedMsg = new ZAssistantMessage(
                     currentContent,
@@ -414,25 +408,13 @@ public class ReActFlowOrchestrator {
         });
         log.debug("[{}] 追加错误信息", requestId(ctx));
 
-        // 刷新对话标题
         flushChatTitle(ctx);
     }
 
-    // ==================== 辅助方法 ====================
-
-    /**
-     * 刷新对话标题
-     */
     private void flushChatTitle(AgentContext ctx) {
         sessionService.flushChat(sessionId(ctx), userId(ctx), question(ctx), targetTask(ctx));
     }
 
-    /**
-     * 发送事件
-     *
-     * @param event 事件对象
-     * @param ctx   执行上下文
-     */
     private void emitEvent(ReActEventVo event, AgentContext ctx) {
         try {
             boolean success = streamManager.tryEmit(sessionId(ctx), event);
@@ -449,6 +431,3 @@ public class ReActFlowOrchestrator {
     }
 
 }
-
-
-
