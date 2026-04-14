@@ -6,6 +6,25 @@
 
 ---
 
+## 项目展示
+
+### 首页界面
+
+<img src="./static/show/index.png" alt="首页界面" width="80%">
+
+### 默认对话界面
+
+<img src="./static/show/default.png" alt="默认对话界面" width="80%">
+
+### Task模式展示
+
+<table>
+  <tr>
+    <td><img src="./static/show/task%20mode1.png" alt="Task模式1" width="100%"></td>
+    <td><img src="./static/show/task%20mode2.png" alt="Task模式2" width="100%"></td>
+  </tr>
+</table>
+
 ## 核心架构
 
 智瞳AI后端采用模块化的微服务架构，基于 `Spring Boot 3.5.8` 和 `Spring AI 1.1.2` 构建，实现了响应式的、事件驱动的 AI 代理服务。
